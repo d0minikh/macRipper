@@ -183,7 +183,7 @@
 					};
 				};
 			};
-			buildConfigurationList = 4D52A1000000000000000092 /* Build configuration list for PBXProject "MacRipper" */;
+			buildConfigurationList = 4D52A1000000000000000092 /* Build configuration list for PBXProject "macRipper" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -409,7 +409,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		4D52A1000000000000000092 /* Build configuration list for PBXProject "MacRipper" */ = {
+		4D52A1000000000000000092 /* Build configuration list for PBXProject "macRipper" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				4D52A10000000000000000C0 /* Debug */,

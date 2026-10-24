@@ -38,9 +38,9 @@ enum AppAppearance: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String {
         switch self {
-        case .dark: "Dark (like Final Cut Pro and Logic Pro)"
         case .system: "Match System"
         case .light: "Light"
+        case .dark: "Dark"
         }
     }
 }
