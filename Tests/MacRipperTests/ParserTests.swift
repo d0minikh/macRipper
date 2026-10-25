@@ -224,4 +224,41 @@ import Testing
         #expect(cfg.minLengthSeconds == 42)
         #expect(cfg.audioFormat == .flac)
     }
+
+    @Test func jobHistoryDecodesLeniently() throws {
+        // An older entry without most fields and one from a newer version with an unknown status.
+        let json = #"""
+        [{"devicePath": "/dev/disk4", "title": "Old", "titles": [{"id": 1}]},
+         {"devicePath": "/dev/disk5", "status": "somethingNew", "discType": "laserdisc", "newField": 1}]
+        """#
+        let jobs = try JSONDecoder().decode([Job].self, from: Data(json.utf8))
+        #expect(jobs.count == 2)
+        #expect(jobs[0].title == "Old")
+        #expect(jobs[0].titles.first?.selected == true)
+        #expect(jobs[0].status == .failed)
+        #expect(jobs[1].discType == .unknown)
+
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        var job = Job(devicePath: "/dev/disk4", driveName: "Drive")
+        job.status = .success
+        job.created = Date(timeIntervalSince1970: 999_000)    // ISO 8601 keeps whole seconds only
+        job.finished = Date(timeIntervalSince1970: 1_000_000)
+        job.titles = [DiscTitle(id: 3, name: "Track 3", selected: false, ripped: true)]
+        #expect(try dec.decode(Job.self, from: enc.encode(job)) == job)
+    }
+
+    @Test func transcodeSlotWaitEndsOnCancel() async throws {
+        let limiter = TranscodeLimiter()
+        try await limiter.acquire(limit: 1)
+        let waiting = Task { try await limiter.acquire(limit: 1) }
+        try await Task.sleep(for: .milliseconds(100))
+        waiting.cancel()
+        await #expect(throws: CancellationError.self) { try await waiting.value }
+        // The cancelled waiter must not hold a slot: after the release the next job gets one immediately.
+        await limiter.release()
+        try await limiter.acquire(limit: 1)
+    }
 }

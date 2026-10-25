@@ -275,12 +275,28 @@ final class ToolManager: ObservableObject {
             throw RipError.failed("MakeMKV.app not found in the disk image")
         }
         let destination = Self.makemkvInstallLocation()
-        if FileManager.default.fileExists(atPath: destination.path) {
-            append("Moving the old version to the Trash")
-            try FileManager.default.trashItem(at: destination, resultingItemURL: nil)
-        }
-        try await runner.run("/usr/bin/ditto", [source.path, destination.path]) { [weak self] line in
-            Task { @MainActor in self?.append(line) }
+        let fm = FileManager.default
+        // Copy next to the destination first: a failed or cancelled copy must not leave the user without MakeMKV.
+        let staging = destination.deletingLastPathComponent().appendingPathComponent(".MakeMKV-\(UUID().uuidString).app")
+        do {
+            try await runner.run("/usr/bin/ditto", [source.path, staging.path]) { [weak self] line in
+                Task { @MainActor in self?.append(line) }
+            }
+            var trashed: NSURL?
+            if fm.fileExists(atPath: destination.path) {
+                append("Moving the old version to the Trash")
+                try fm.trashItem(at: destination, resultingItemURL: &trashed)
+            }
+            do {
+                try fm.moveItem(at: staging, to: destination)
+            } catch {
+                // Put the old version back.
+                if let trashed = trashed as URL? { try? fm.moveItem(at: trashed, to: destination) }
+                throw error
+            }
+        } catch {
+            try? fm.removeItem(at: staging)
+            throw error
         }
         append("Installed MakeMKV \(latest.version) to \(destination.path)")
     }

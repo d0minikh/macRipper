@@ -14,11 +14,13 @@ struct ProcessError: LocalizedError {
 final class ProcessRunner: @unchecked Sendable {
     private let lock = NSLock()
     private var process: Process?
-    private(set) var cancelled = false
+    private var _cancelled = false
+    /// Read from other threads (e.g. the raw disc copy loop), so always under the lock.
+    var cancelled: Bool { lock.withLock { _cancelled } }
 
     func cancel() {
         lock.lock(); defer { lock.unlock() }
-        cancelled = true
+        _cancelled = true
         if let p = process, p.isRunning {
             p.interrupt()
             // Force-kill only if this very process is still running; its PID may be reused otherwise.
@@ -49,7 +51,7 @@ final class ProcessRunner: @unchecked Sendable {
         // A cancel that arrives before the process exists must still stop it, so this is checked under the lock.
         let alreadyCancelled = lock.withLock { () -> Bool in
             process = p
-            return cancelled
+            return _cancelled
         }
         if alreadyCancelled { throw CancellationError() }
 
@@ -65,7 +67,7 @@ final class ProcessRunner: @unchecked Sendable {
                 do {
                     try p.run()
                     // cancel() skips a process that was not running yet.
-                    if lock.withLock({ cancelled }) { p.interrupt() }
+                    if cancelled { p.interrupt() }
                 } catch {
                     p.terminationHandler = nil
                     cont.resume(throwing: error)

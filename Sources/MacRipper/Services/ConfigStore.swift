@@ -121,14 +121,28 @@ enum SecretStore {
 /// Limits how many transcodes run at the same time (ARM: MAX_CONCURRENT_TRANSCODES).
 actor TranscodeLimiter {
     private var running = 0
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var waiters: [(id: UUID, continuation: CheckedContinuation<Void, Error>)] = []
 
-    func acquire(limit: Int) async {
+    /// Waits for a free slot. Throws `CancellationError` if the job is abandoned while waiting,
+    /// so it does not sit in the queue until another transcode finishes.
+    func acquire(limit: Int) async throws {
         if running < max(1, limit) { running += 1; return }
-        await withCheckedContinuation { waiters.append($0) }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled { cont.resume(throwing: CancellationError()) } else { waiters.append((id, cont)) }
+            }
+        } onCancel: {
+            Task { await self.cancelWaiter(id) }
+        }
+    }
+
+    private func cancelWaiter(_ id: UUID) {
+        guard let i = waiters.firstIndex(where: { $0.id == id }) else { return }
+        waiters.remove(at: i).continuation.resume(throwing: CancellationError())
     }
 
     func release() {
-        if waiters.isEmpty { running -= 1 } else { waiters.removeFirst().resume() }
+        if waiters.isEmpty { running -= 1 } else { waiters.removeFirst().continuation.resume() }
     }
 }

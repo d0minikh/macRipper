@@ -141,6 +141,8 @@ struct AudioSearchSheet: View {
     }
 
     private func search() {
+        // Return in the empty field would otherwise send an invalid " AND tracks:…" query.
+        guard !query.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         searching = true
         error = nil
         Task {

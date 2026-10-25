@@ -151,3 +151,68 @@ struct Job: Codable, Identifiable, Hashable {
 
     var logURL: URL { AppPaths.logs.appendingPathComponent("job-\(id.uuidString).log") }
 }
+
+// Decoding is lenient so fields added or changed later never make a saved job history unreadable.
+
+extension Job {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = c.lenient(.id, default: UUID())
+        created = c.lenient(.created, default: Date())
+        finished = c.lenientOptional(.finished)
+        devicePath = c.lenient(.devicePath, default: "")
+        mountPoint = c.lenientOptional(.mountPoint)
+        driveName = c.lenient(.driveName, default: "")
+        discLabel = c.lenient(.discLabel, default: "")
+        discType = c.lenient(.discType, default: .unknown)
+        title = c.lenient(.title, default: "")
+        year = c.lenient(.year, default: "")
+        videoKind = c.lenient(.videoKind, default: .unknown)
+        imdbID = c.lenient(.imdbID, default: "")
+        posterURL = c.lenient(.posterURL, default: "")
+        artist = c.lenient(.artist, default: "")
+        album = c.lenient(.album, default: "")
+        musicBrainzDiscID = c.lenient(.musicBrainzDiscID, default: "")
+        musicBrainzReleaseID = c.lenient(.musicBrainzReleaseID, default: "")
+        audioInfo = c.lenientOptional(.audioInfo)
+        identifiedByUser = c.lenient(.identifiedByUser, default: false)
+        // An unknown status (e.g. written by a newer version) cannot be resumed anyway.
+        status = c.lenient(.status, default: .failed)
+        stage = c.lenient(.stage, default: "")
+        progress = c.lenient(.progress, default: 0)
+        stageStarted = c.lenientOptional(.stageStarted)
+        remainingSeconds = c.lenientOptional(.remainingSeconds)
+        errorMessage = c.lenientOptional(.errorMessage)
+        titles = c.lenient(.titles, default: [])
+        outputPath = c.lenient(.outputPath, default: "")
+    }
+}
+
+extension DiscTitle {
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = c.lenient(.name, default: "")
+        durationSeconds = c.lenient(.durationSeconds, default: 0)
+        chapters = c.lenient(.chapters, default: 0)
+        sizeBytes = c.lenient(.sizeBytes, default: 0)
+        sourceFile = c.lenient(.sourceFile, default: "")
+        outputFile = c.lenient(.outputFile, default: "")
+        selected = c.lenient(.selected, default: true)
+        isMainFeature = c.lenient(.isMainFeature, default: false)
+        ripped = c.lenient(.ripped, default: false)
+        transcoded = c.lenient(.transcoded, default: false)
+        audio = c.lenientOptional(.audio)
+    }
+}
+
+extension KeyedDecodingContainer {
+    /// The stored value, or `defaultValue` when it is missing or cannot be read.
+    func lenient<T: Decodable>(_ key: Key, default defaultValue: T) -> T {
+        ((try? decodeIfPresent(T.self, forKey: key)) ?? nil) ?? defaultValue
+    }
+
+    func lenientOptional<T: Decodable>(_ key: Key) -> T? {
+        (try? decodeIfPresent(T.self, forKey: key)) ?? nil
+    }
+}

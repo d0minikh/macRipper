@@ -54,7 +54,14 @@ final class JobManager: ObservableObject {
         guard let data = try? Data(contentsOf: AppPaths.jobsFile) else { return }
         let dec = JSONDecoder()
         dec.dateDecodingStrategy = .iso8601
-        jobs = (try? dec.decode([Job].self, from: data)) ?? []
+        do {
+            jobs = try dec.decode([Job].self, from: data)
+        } catch {
+            // The debounced save would overwrite the unreadable file with an empty list; keep it aside instead.
+            let backup = AppPaths.support.appendingPathComponent("jobs-unreadable-\(Int(Date().timeIntervalSince1970)).json")
+            try? FileManager.default.moveItem(at: AppPaths.jobsFile, to: backup)
+            return
+        }
         // Jobs that were running when the app quit cannot be resumed.
         for i in jobs.indices where jobs[i].status.isActive {
             jobs[i].status = .failed
@@ -273,9 +280,12 @@ final class JobManager: ObservableObject {
     }
 
     private func progressHandler(_ id: UUID, scale: (Double, Double) = (0, 1)) -> @Sendable (Double) -> Void {
-        { [weak self] p in
+        // Updates arrive asynchronously; one queued before the next stage began must not overwrite its progress.
+        let stage = job(id)?.stageStarted
+        return { [weak self] p in
             Task { @MainActor in
                 self?.update(id) {
+                    guard $0.stageStarted == stage else { return }
                     $0.progress = scale.0 + min(max(p, 0), 1) * (scale.1 - scale.0)
                     if $0.status == .ripping || $0.status == .transcoding {
                         $0.remainingSeconds = Job.estimateRemaining(progress: $0.progress, stageStarted: $0.stageStarted)
@@ -332,6 +342,8 @@ final class JobManager: ObservableObject {
             case .audioCD: try await ripAudio(id, runner: runner, log: log)
             case .data, .unknown: try await ripData(id, runner: runner, log: log)
             }
+            // Abandoning while the disc ejects must not be turned into "Finished" below.
+            guard !isCancelled(id) else { throw CancellationError() }
 
             update(id) {
                 $0.status = .success
@@ -353,9 +365,10 @@ final class JobManager: ObservableObject {
                 }
             }
         } catch {
-            // An interrupted tool exits with an error after the user abandoned the job.
-            if job(id)?.status == .abandoned {
-                log.write("Job abandoned")
+            // An interrupted tool exits with an error after the user abandoned the job or the disc was
+            // removed; keep that status and message instead of the follow-up error.
+            if let status = job(id)?.status, !status.isActive {
+                log.write(status == .abandoned ? "Job abandoned" : "Job stopped: \(job(id)?.errorMessage ?? status.label)")
                 return
             }
             log.write("ERROR: \(error.localizedDescription)")
@@ -642,7 +655,7 @@ final class JobManager: ObservableObject {
     private func transcode(_ id: UUID, _ source: VideoTranscoder.Source, title: DiscTitle, to dest: URL, discType: DiscType,
                            runner: ProcessRunner, log: JobLogger, label: String = "Transcoding") async throws {
         setStage(id, .transcoding, "\(label) – waiting for a free slot")
-        await limiter.acquire(limit: config.maxConcurrentTranscodes)
+        try await limiter.acquire(limit: config.maxConcurrentTranscodes)
         do {
             setStage(id, .transcoding, "\(label) (\(config.transcoder.label))")
             // Encode into TRANSCODE_PATH first so the library never sees half-written files.
@@ -715,9 +728,18 @@ final class JobManager: ObservableObject {
         AppConfig.expand(config.musicPath).appendingPathComponent(AudioRipper.expand(config.audioFolderPattern, album))
     }
 
-    private func audioFileName(_ tags: AudioTags, ext: String) -> String {
+    /// `taken` holds the names already given to other tracks of the job (lowercased, as APFS ignores case).
+    private func audioFileName(_ tags: AudioTags, ext: String, taken: inout Set<String>) -> String {
         let pattern = AudioRipper.filePattern(config.audioFilePattern, discTotal: tags.discTotal)
-        return AudioRipper.expand(pattern, tags) + "." + ext
+        let base = AudioRipper.expand(pattern, tags)
+        // A pattern without {track} can give two tracks the same name; one file must never replace another.
+        var name = "\(base).\(ext)"
+        var n = 2
+        while !taken.insert(name.lowercased()).inserted {
+            name = "\(base) (\(n)).\(ext)"
+            n += 1
+        }
+        return name
     }
 
     /// Saves the original cover next to the music files (cover.jpg / folder.png …), replacing an older one.
@@ -742,6 +764,7 @@ final class JobManager: ObservableObject {
         saveCoverFile(job, in: folder)
 
         let audioStarted = Date()
+        var taken = Set<String>()
         for (n, track) in selected.enumerated() {
             if isCancelled(id) { throw CancellationError() }
             setStage(id, .ripping, "Ripping track \(track.id) (\(n + 1)/\(selected.count))", progress: Double(n) / Double(selected.count))
@@ -750,7 +773,7 @@ final class JobManager: ObservableObject {
                 $0.remainingSeconds = Job.estimateRemaining(progress: $0.progress, stageStarted: audioStarted)
             }
             let tags = trackTags(album, track)
-            let out = folder.appendingPathComponent(audioFileName(tags, ext: config.audioFormat.fileExtension))
+            let out = folder.appendingPathComponent(audioFileName(tags, ext: config.audioFormat.fileExtension, taken: &taken))
             try await ripper.encode(URL(fileURLWithPath: track.sourceFile), to: out, tags: tags, runner: runner, log: log)
             update(id) { j in
                 if let i = j.titles.firstIndex(where: { $0.id == track.id }) {
@@ -781,6 +804,7 @@ final class JobManager: ObservableObject {
             // Rename in two steps: a new name may equal the old name of another track, which a direct move
             // would overwrite.
             var moves: [(track: DiscTitle, temp: URL, new: URL, tags: AudioTags)] = []
+            var taken = Set<String>()
             for track in job.titles where track.ripped && !track.outputFile.isEmpty {
                 let old = oldFolder.appendingPathComponent(track.outputFile)
                 guard FileManager.default.fileExists(atPath: old.path) else {
@@ -788,7 +812,7 @@ final class JobManager: ObservableObject {
                     continue
                 }
                 let tags = trackTags(album, track)
-                let new = newFolder.appendingPathComponent(audioFileName(tags, ext: old.pathExtension))
+                let new = newFolder.appendingPathComponent(audioFileName(tags, ext: old.pathExtension, taken: &taken))
                 let temp = newFolder.appendingPathComponent(".macripper-\(UUID().uuidString).\(old.pathExtension)")
                 do {
                     try FileManager.default.moveItem(at: old, to: temp)
