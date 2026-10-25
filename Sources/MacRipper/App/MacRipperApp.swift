@@ -48,7 +48,10 @@ final class AppModel: ObservableObject {
             }
             .store(in: &cancellables)
         NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)
-            .sink { [weak self] _ in self?.manager.cancelAll() }
+            .sink { [weak self] _ in
+                self?.manager.cancelAll()
+                self?.manager.saveNow()
+            }
             .store(in: &cancellables)
         monitor.start()
         Notifier.requestAuthorization()

@@ -80,12 +80,8 @@ extension AppConfig {
 
 /// All secrets as one JSON blob in a single generic password item.
 enum SecretStore {
-    #if DEBUG
-    // Debug builds have a different code signature; a separate item avoids Keychain prompts for the real one.
-    private static let service = "local.macripper.MacRipper.debug"
-    #else
-    private static let service = "local.macripper.MacRipper"
-    #endif
+    // Isolated runs (tests, debug hooks) get their own item, like their own data folder.
+    private static let service = AppPaths.isolated ? "local.macripper.MacRipper.debug" : "local.macripper.MacRipper"
     private static let account = "settings"
 
     private static var query: [String: Any] {

@@ -46,7 +46,12 @@ final class ProcessRunner: @unchecked Sendable {
         p.standardError = pipe
         p.standardInput = FileHandle.nullDevice
 
-        lock.withLock { process = p }
+        // A cancel that arrives before the process exists must still stop it, so this is checked under the lock.
+        let alreadyCancelled = lock.withLock { () -> Bool in
+            process = p
+            return cancelled
+        }
+        if alreadyCancelled { throw CancellationError() }
 
         let collector = OutputCollector(onLine: onLine, log: log)
         pipe.fileHandleForReading.readabilityHandler = { handle in
@@ -57,7 +62,11 @@ final class ProcessRunner: @unchecked Sendable {
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (cont: CheckedContinuation<Void, Error>) in
                 p.terminationHandler = { _ in cont.resume() }
-                do { try p.run() } catch {
+                do {
+                    try p.run()
+                    // cancel() skips a process that was not running yet.
+                    if lock.withLock({ cancelled }) { p.interrupt() }
+                } catch {
                     p.terminationHandler = nil
                     cont.resume(throwing: error)
                 }

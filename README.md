@@ -151,7 +151,8 @@ cd macRipper
 open macRipper.xcodeproj
 ```
 
-Press **⌘R** to build and run, **⌘U** to run the tests.
+Press **⌘R** to build and run, **⌘U** to run the tests. Xcode puts the finished app into `build/Debug/MacRipper.app`
+(or `build/Release/MacRipper.app` for the Release configuration).
 
 To sign with your own Apple Developer account, select the *MacRipper* target → *Signing & Capabilities*, choose your
 *Team* and change the *Bundle Identifier* (also for the *MacRipperTests* target). Without a team the app is signed
@@ -399,8 +400,9 @@ scripts/                build-app.sh, make-icon.swift
 Run the tests with ⌘U in Xcode or `swift test`. Live tests against MusicBrainz, Cover Art Archive and Apple Music
 run with `MACRIPPER_NETWORK_TESTS=1`.
 
-Debug builds keep their data in `~/Library/Application Support/MacRipper-Debug`, use a separate Keychain item and
-understand a few environment variables (pre-configured but switched off in the Xcode scheme):
+Debug builds started from Xcode use the same history and settings as the installed app. Test runs, and launches
+with any of the following environment variables (pre-configured but switched off in the Xcode scheme), keep their
+data in `~/Library/Application Support/MacRipper-Debug` and use a separate Keychain item instead:
 
 | Variable | Effect |
 | --- | --- |

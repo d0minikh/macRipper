@@ -264,4 +264,59 @@ struct OnlineMetadataTests {
         #expect(manager.job(job.id)?.outputPath == newFolder.path)
         #expect(manager.job(job.id)?.audioInfo?.tagsChangedAfterRip == false)
     }
+
+    /// Swapping two titles makes each new file name equal the other track's old one; no track may be lost.
+    @MainActor @Test func swappedTitlesDoNotOverwriteEachOther() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("retag-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = ConfigStore()
+        let previous = store.config
+        defer { store.config = previous }
+        store.config.musicPath = root.path
+        store.config.audioFormat = .flac
+        store.config.audioFolderPattern = "{artist}/{album}"
+        store.config.audioFilePattern = "{title}"
+        let manager = JobManager(configStore: store, monitor: DiscMonitor())
+
+        let folder = root.appendingPathComponent("Artist/Album")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let wav = root.appendingPathComponent("in.wav")
+        try ParserTests.silentWAV().write(to: wav)
+        for name in ["A", "B"] {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/afconvert")
+            p.arguments = ["-f", "flac", "-d", "flac", wav.path, folder.appendingPathComponent("\(name).flac").path]
+            try p.run(); p.waitUntilExit()
+        }
+
+        var job = Job(devicePath: "/dev/disk9")
+        job.discType = .audioCD
+        job.status = .success
+        job.artist = "Artist"
+        job.album = "Album"
+        job.outputPath = folder.path
+        job.audioInfo = AudioAlbumInfo()
+        job.titles = [DiscTitle(id: 1, name: "A", outputFile: "A.flac", ripped: true),
+                      DiscTitle(id: 2, name: "B", outputFile: "B.flac", ripped: true)]
+        manager.insertForDebug([job])
+        manager.setIdentification(job.id) {
+            $0.titles[0].name = "B"
+            $0.titles[1].name = "A"
+        }
+
+        await manager.writeTagsToFiles(job.id)
+        #expect(manager.retagErrors[job.id] == nil)
+        let a = try Data(contentsOf: folder.appendingPathComponent("A.flac"))
+        let b = try Data(contentsOf: folder.appendingPathComponent("B.flac"))
+        #expect(a.range(of: Data("TRACKNUMBER=2".utf8)) != nil)
+        #expect(b.range(of: Data("TRACKNUMBER=1".utf8)) != nil)
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: folder.path).filter { $0.hasPrefix(".macripper-") }
+        #expect(leftovers.isEmpty)
+    }
+}
+
+@Test func sanitizeKeepsFileNamesWithinByteLimit() {
+    let name = AudioRipper.sanitize(String(repeating: "東京", count: 150))
+    #expect(name.utf8.count <= 200)
+    #expect(!name.isEmpty)
 }

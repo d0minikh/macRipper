@@ -25,11 +25,7 @@ final class JobManager: ObservableObject {
         loadJobs()
         saveCancellable = $jobs
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
-            .sink { jobs in
-                let enc = JSONEncoder()
-                enc.dateEncodingStrategy = .iso8601
-                if let data = try? enc.encode(jobs) { try? AppPaths.writePrivate(data, to: AppPaths.jobsFile) }
-            }
+            .sink { Self.save($0) }
         monitor.onInserted = { [weak self] disc, atLaunch in
             guard let self else { return }
             if atLaunch || !self.config.autoRip { return }
@@ -44,6 +40,15 @@ final class JobManager: ObservableObject {
             }
         }
     }
+
+    private static func save(_ jobs: [Job]) {
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        if let data = try? enc.encode(jobs) { try? AppPaths.writePrivate(data, to: AppPaths.jobsFile) }
+    }
+
+    /// Writes the job list right away; the regular save is debounced and would miss changes made just before quitting.
+    func saveNow() { Self.save(jobs) }
 
     private func loadJobs() {
         guard let data = try? Data(contentsOf: AppPaths.jobsFile) else { return }
@@ -96,14 +101,27 @@ final class JobManager: ObservableObject {
     }
 
     func delete(_ id: UUID) {
-        guard job(id)?.status.isActive != true else { return }
+        guard let job = job(id), !job.status.isActive else { return }
+        removeFiles(of: job)
         jobs.removeAll { $0.id == id }
     }
 
     /// Stops all external tools, e.g. when the app quits.
     func cancelAll() { runners.values.forEach { $0.cancel() } }
 
-    func clearHistory() { jobs.removeAll { !$0.status.isActive } }
+    func clearHistory() {
+        jobs.filter { !$0.status.isActive }.forEach(removeFiles)
+        jobs.removeAll { !$0.status.isActive }
+    }
+
+    /// The app's own copies of a job (cover and log); ripped files in the library stay untouched.
+    private func removeFiles(of job: Job) {
+        if let cover = job.audioInfo?.cover?.path, cover.hasPrefix(CoverArt.coversFolder.path + "/") {
+            try? FileManager.default.removeItem(atPath: cover)
+        }
+        try? FileManager.default.removeItem(at: job.logURL)
+        retagErrors[job.id] = nil
+    }
 
     #if DEBUG
     func insertForDebug(_ demo: [Job]) { jobs.append(contentsOf: demo) }
@@ -560,17 +578,19 @@ final class JobManager: ObservableObject {
         log.write("Ripping finished")
         await ejectAfterRip(id, disc.devicePath)
 
-        let finalDir = uniqueDirectory(finalVideoDir(job))
+        // Title, year and kind may have been corrected while the disc was ripping.
+        let current = self.job(id) ?? job
+        let finalDir = uniqueDirectory(finalVideoDir(current))
         try FileManager.default.createDirectory(at: finalDir, withIntermediateDirectories: true)
         update(id) { $0.outputPath = finalDir.path }
-        if config.ripPosters, !job.posterURL.isEmpty {
-            await Metadata.downloadImage(job.posterURL, to: finalDir.appendingPathComponent("poster.jpg"))
+        if config.ripPosters, !current.posterURL.isEmpty {
+            await Metadata.downloadImage(current.posterURL, to: finalDir.appendingPathComponent("poster.jpg"))
         }
 
         let ext = config.destinationExtension.isEmpty ? "mkv" : config.destinationExtension
-        let name = baseName(job)
+        let name = baseName(current)
         func destination(for title: DiscTitle, index: Int) -> URL {
-            if job.videoKind == .series {
+            if current.videoKind == .series {
                 return finalDir.appendingPathComponent("\(name) - t\(String(format: "%02d", title.id)).\(ext)")
             }
             if title.isMainFeature || selected.count == 1 {
@@ -589,7 +609,7 @@ final class JobManager: ObservableObject {
             }
             let main = selected.first(where: \.isMainFeature) ?? selected[0]
             try await transcode(id, .backupTitle(rawDir, title: nil), title: main,
-                                to: finalDir.appendingPathComponent("\(name).\(ext)"), discType: job.discType,
+                                to: finalDir.appendingPathComponent("\(name).\(ext)"), discType: current.discType,
                                 runner: runner, log: log)
         } else {
             for (n, item) in rippedFiles.enumerated() {
@@ -598,11 +618,12 @@ final class JobManager: ObservableObject {
                 try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if config.skipTranscode {
                     setStage(id, .finishing, "Moving \(item.file.lastPathComponent)", progress: Double(n) / Double(rippedFiles.count))
-                    try? FileManager.default.removeItem(at: dest)
-                    try FileManager.default.moveItem(at: item.file, to: dest.deletingPathExtension().appendingPathExtension("mkv"))
+                    let target = dest.deletingPathExtension().appendingPathExtension("mkv")
+                    try? FileManager.default.removeItem(at: target)
+                    try FileManager.default.moveItem(at: item.file, to: target)
                 } else {
                     setStage(id, .transcoding, "Transcoding \(n + 1)/\(rippedFiles.count)")
-                    try await transcode(id, .file(item.file), title: item.title, to: dest, discType: job.discType,
+                    try await transcode(id, .file(item.file), title: item.title, to: dest, discType: current.discType,
                                         runner: runner, log: log, label: "Transcoding \(n + 1)/\(rippedFiles.count)")
                 }
                 update(id) { j in
@@ -757,6 +778,9 @@ final class JobManager: ObservableObject {
             let oldFolder = URL(fileURLWithPath: job.outputPath)
             let newFolder = audioFolder(album)
             try FileManager.default.createDirectory(at: newFolder, withIntermediateDirectories: true)
+            // Rename in two steps: a new name may equal the old name of another track, which a direct move
+            // would overwrite.
+            var moves: [(track: DiscTitle, temp: URL, new: URL, tags: AudioTags)] = []
             for track in job.titles where track.ripped && !track.outputFile.isEmpty {
                 let old = oldFolder.appendingPathComponent(track.outputFile)
                 guard FileManager.default.fileExists(atPath: old.path) else {
@@ -765,14 +789,31 @@ final class JobManager: ObservableObject {
                 }
                 let tags = trackTags(album, track)
                 let new = newFolder.appendingPathComponent(audioFileName(tags, ext: old.pathExtension))
-                if new.standardizedFileURL != old.standardizedFileURL {
-                    try? FileManager.default.removeItem(at: new)
-                    try FileManager.default.moveItem(at: old, to: new)
+                let temp = newFolder.appendingPathComponent(".macripper-\(UUID().uuidString).\(old.pathExtension)")
+                do {
+                    try FileManager.default.moveItem(at: old, to: temp)
+                } catch {
+                    // Put the files moved so far back, so the job still matches what is on disk.
+                    for move in moves {
+                        try? FileManager.default.moveItem(at: move.temp, to: oldFolder.appendingPathComponent(move.track.outputFile))
+                    }
+                    throw error
                 }
-                try await AudioRipper.writeTags(tags, to: new, config: config, runner: runner, log: log)
-                update(id) { j in
-                    if let i = j.titles.firstIndex(where: { $0.id == track.id }) { j.titles[i].outputFile = new.lastPathComponent }
+                moves.append((track, temp, new, tags))
+            }
+            for move in moves {
+                try? FileManager.default.removeItem(at: move.new)
+                try FileManager.default.moveItem(at: move.temp, to: move.new)
+            }
+            // The files now live in the new folder, so the job must point there even if tagging fails below.
+            update(id) { j in
+                j.outputPath = newFolder.path
+                for move in moves {
+                    if let i = j.titles.firstIndex(where: { $0.id == move.track.id }) { j.titles[i].outputFile = move.new.lastPathComponent }
                 }
+            }
+            for move in moves {
+                try await AudioRipper.writeTags(move.tags, to: move.new, config: config, runner: runner, log: log)
             }
             if let current = self.job(id) { saveCoverFile(current, in: newFolder) }
             if newFolder.standardizedFileURL != oldFolder.standardizedFileURL {
@@ -781,10 +822,7 @@ final class JobManager: ObservableObject {
                 for ext in ["jpg", "png"] { try? FileManager.default.removeItem(at: oldFolder.appendingPathComponent("\(name).\(ext)")) }
                 removeEmptyFolders(from: oldFolder, stopAt: AppConfig.expand(config.musicPath))
             }
-            update(id) {
-                $0.outputPath = newFolder.path
-                $0.audioInfo?.tagsChangedAfterRip = false
-            }
+            update(id) { $0.audioInfo?.tagsChangedAfterRip = false }
             log.write("Tags written to \(newFolder.path)")
         } catch {
             log.write("Rewriting tags failed: \(error.localizedDescription)")

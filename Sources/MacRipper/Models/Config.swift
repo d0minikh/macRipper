@@ -1,12 +1,16 @@
 import Foundation
 
 enum AppPaths {
-    /// Debug builds keep their own data so test runs never touch the real job history or settings.
-    #if DEBUG
-    static let folderName = "MacRipper-Debug"
-    #else
-    static let folderName = "MacRipper"
-    #endif
+    /// Test runs and launches with the MACRIPPER_* debug hooks (sample jobs, clearing the history …) keep their own
+    /// data, so they never touch the real job history or settings. Normal launches, Xcode's Debug runs included,
+    /// share the real data.
+    static let isolated: Bool = {
+        let info = ProcessInfo.processInfo
+        if info.processName != "MacRipper" { return true }    // xctest, swiftpm-testing-helper
+        return info.environment.keys.contains { $0.hasPrefix("XCTest") || $0.hasPrefix("MACRIPPER_") }
+    }()
+
+    static let folderName = isolated ? "MacRipper-Debug" : "MacRipper"
 
     static let support: URL = {
         let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

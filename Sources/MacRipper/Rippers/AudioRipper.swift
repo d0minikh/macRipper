@@ -100,7 +100,14 @@ struct AudioRipper {
         let bad = CharacterSet(charactersIn: "/:\\?%*|\"<>").union(.controlCharacters)
         let cleaned = s.components(separatedBy: bad).joined(separator: "_").trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmed = cleaned.hasPrefix(".") ? "_" + cleaned.dropFirst() : cleaned
-        return trimmed.isEmpty ? "Unknown" : String(trimmed.prefix(200))
+        guard !trimmed.isEmpty else { return "Unknown" }
+        // File names may have at most 255 bytes; CJK titles take 3 bytes per character.
+        var result = ""
+        for ch in trimmed {
+            if result.utf8.count + ch.utf8.count > 200 { break }
+            result.append(ch)
+        }
+        return result
     }
 
     /// Placeholders: {artist} (album artist), {albumartist}, {trackartist}, {album}, {year}, {genre}, {disc}, {track}, {title}.

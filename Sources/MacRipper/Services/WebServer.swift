@@ -134,14 +134,14 @@ final class WebServer {
     const active=['identifying','waiting','ripping','transcoding','finishing'];
     function name(j){if(j.discType==='audio_cd'&&j.album)return (j.artist?j.artist+' – ':'')+j.album;
       return j.title?(j.year?j.title+' ('+j.year+')':j.title):(j.discLabel||'Untitled Disc')}
-    function fmt(s){const h=Math.floor(s/3600),m=Math.round((s%3600)/60);return h?h+' h '+m+' min':(s<120?s+' s':m+' min')}
+    function fmt(s){s=Math.round(s);const h=Math.floor(s/3600),m=Math.round((s%3600)/60);return h?h+' h '+m+' min':(s<120?s+' s':m+' min')}
     async function act(id,a){await fetch('/api/jobs/'+id+'/'+a+q,{method:'POST'});load()}
     function card(j){const act_=active.includes(j.status);return `<div class="job"><div class="row"><span class="t">${esc(name(j))}</span>
       <span class="m">${esc(j.discType)} · ${esc(j.status)}</span></div>
       ${act_?`<div class="bar"><div style="width:${(j.progress*100).toFixed(1)}%"></div></div>`:''}
       <div class="row"><span class="m">${esc(j.stage)}${act_&&j.remainingSeconds!=null?' · about '+esc(fmt(j.remainingSeconds))+' remaining':''}</span><span>
       ${j.status==='waiting'?`<button onclick="act('${j.id}','start')">Start Now</button>`:''}
-      ${act_?`<button onclick="act('${j.id}','abandon')">Abbrechen</button>`:''}
+      ${act_?`<button onclick="act('${j.id}','abandon')">Abandon</button>`:''}
       <a class="m" href="/api/jobs/${j.id}/log${q}" target="_blank">Log</a></span></div>
       ${j.errorMessage?`<div class="err">${esc(j.errorMessage)}</div>`:''}</div>`}
     async function load(){const r=await fetch('/api/jobs'+q);if(!r.ok)return;const js=await r.json();
