@@ -14,6 +14,7 @@ rebuilt from scratch in SwiftUI with Liquid Glass.
 ![macOS 26+](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)
 ![Swift](https://img.shields.io/badge/Swift-SwiftUI-F05138?logo=swift&logoColor=white)
 ![Xcode](https://img.shields.io/badge/Xcode-27-147EFB?logo=xcode&logoColor=white)
+[![Latest pre-release](https://img.shields.io/github/v/release/d0minikh/macRipper?include_prereleases&label=pre-release)](https://github.com/d0minikh/macRipper/releases)
 ![Built with Claude Code](https://img.shields.io/badge/vibe%20coded%20with-Claude%20Code-D97757)
 
 [Features](#features) ·
@@ -130,7 +131,8 @@ Mac – as a real Mac app instead of a Docker container:
 | --- | --- |
 | **macOS** | 26 (Tahoe) or later – the interface uses Liquid Glass |
 | **Hardware** | An optical drive (internal, USB or Thunderbolt). Blu-ray needs a drive MakeMKV supports. |
-| **To build** | Xcode 26 or later (recommended), or the Swift toolchain of the Command Line Tools |
+| **Mac** | Apple silicon or Intel (universal app) |
+| **To build** | Only when building from source: Xcode 26 or later, or the Swift toolchain of the Command Line Tools |
 | **DVD / Blu-ray** | [MakeMKV](https://www.makemkv.com) |
 | **Transcoding** | [HandBrakeCLI](https://handbrake.fr) (or FFmpeg) |
 | **Optional** | [FFmpeg](https://ffmpeg.org) (FFmpeg transcoder, MP3), [Apprise](https://github.com/caronc/apprise), [Homebrew](https://brew.sh) |
@@ -139,12 +141,42 @@ You don't have to install the tools by hand: the **Tools** page in the app insta
 
 ## Installation
 
-There are no prebuilt releases yet – MacRipper is built from source.
+> [!NOTE]
+> MacRipper is in **beta**. The current release is a pre-release – expect bugs and keep backups of anything
+> important.
 
-### Option A: Xcode (recommended)
+### Option A: Download (easiest)
+
+Get the latest version from the [**Releases page**](https://github.com/d0minikh/macRipper/releases). Each release
+comes in two flavors – pick one:
+
+| File | How to install |
+| --- | --- |
+| `MacRipper-<version>.dmg` | Open the disk image and drag **MacRipper** onto the **Applications** folder. |
+| `MacRipper-<version>.pkg` | Double-click the installer and follow the steps. It puts MacRipper into `/Applications`. |
+
+`SHA256SUMS.txt` lists the checksums, so you can verify a download with
+`shasum -a 256 -c SHA256SUMS.txt` in the download folder.
+
+**"MacRipper can't be opened" / "Apple could not verify …"** – the releases are not yet signed with an Apple
+Developer ID or notarized, so macOS blocks them on the first launch. To allow MacRipper once:
+
+1. Try to open the app (or the `.pkg`) and close the warning.
+2. Open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to the MacRipper
+   message, then confirm with your password or Touch ID.
+
+Alternatively, after copying the app to `/Applications`, remove the download quarantine in Terminal:
 
 ```bash
-git clone https://github.com/<your-account>/macRipper.git
+xattr -dr com.apple.quarantine /Applications/MacRipper.app
+```
+
+To update, install the new version over the old one – your settings, job history and Keychain entries stay in place.
+
+### Option B: Build with Xcode
+
+```bash
+git clone https://github.com/d0minikh/macRipper.git
 cd macRipper
 open macRipper.xcodeproj
 ```
@@ -174,7 +206,7 @@ Mac App Store.
 
 </details>
 
-### Option B: Command line
+### Option C: Build on the command line
 
 ```bash
 ./scripts/build-app.sh

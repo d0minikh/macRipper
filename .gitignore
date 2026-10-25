@@ -11,3 +11,6 @@ Config/Signing.local.xcconfig
 
 # Coverage data from test runs
 *.profraw
+
+# Release builds (DMG, pkg)
+dist/
