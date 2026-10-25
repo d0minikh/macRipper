@@ -154,9 +154,17 @@ open macRipper.xcodeproj
 Press **⌘R** to build and run, **⌘U** to run the tests. Xcode puts the finished app into `build/Debug/MacRipper.app`
 (or `build/Release/MacRipper.app` for the Release configuration).
 
-To sign with your own Apple Developer account, select the *MacRipper* target → *Signing & Capabilities*, choose your
-*Team* and change the *Bundle Identifier* (also for the *MacRipperTests* target). Without a team the app is signed
-"to run locally", which works fine on your own Mac.
+Out of the box the project has no team and signs the app "to run locally", which works fine on your own Mac.
+To sign with your own Apple Developer account, keep your team out of the project file and put it into a local,
+git-ignored config instead:
+
+```bash
+cp Config/Signing.local.xcconfig.example Config/Signing.local.xcconfig
+```
+
+Then replace the placeholder team ID in `Config/Signing.local.xcconfig` with yours. Don't pick a *Team* under
+*Signing & Capabilities* – Xcode would write it into `project.pbxproj`. A signed build keeps a stable signature, so
+macOS remembers the permissions you grant MacRipper between builds.
 
 <details>
 <summary><b>Distributing to other Macs</b></summary>

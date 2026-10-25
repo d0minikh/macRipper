@@ -5,3 +5,6 @@ build/
 xcuserdata/
 *.xcuserstate
 DerivedData/
+
+# Personal signing settings, see Config/Signing.xcconfig
+Config/Signing.local.xcconfig

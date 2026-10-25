@@ -1,0 +1,11 @@
+// Signing defaults shared by all targets.
+//
+// The committed defaults are neutral: no team, signed "to run locally" (ad hoc), so anyone can build the
+// project right after cloning. To sign with your own Apple Developer account, copy
+// Signing.local.xcconfig.example to Signing.local.xcconfig and fill in your team. That file is ignored by git.
+
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = -
+DEVELOPMENT_TEAM =
+
+#include? "Signing.local.xcconfig"

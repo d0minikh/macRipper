@@ -21,6 +21,7 @@
 		4D52A1000000000000000031 /* MacRipperTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MacRipperTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		4D52A1000000000000000032 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 		4D52A1000000000000000033 /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Package.swift; sourceTree = "<group>"; };
+		4D52A1000000000000000034 /* Signing.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Signing.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -84,10 +85,19 @@
 				4D52A1000000000000000051 /* Resources */,
 				4D52A1000000000000000012 /* Tests */,
 				4D52A1000000000000000053 /* scripts */,
+				4D52A1000000000000000014 /* Config */,
 				4D52A1000000000000000032 /* README.md */,
 				4D52A1000000000000000033 /* Package.swift */,
 				4D52A1000000000000000013 /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		4D52A1000000000000000014 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				4D52A1000000000000000034 /* Signing.xcconfig */,
+			);
+			path = Config;
 			sourceTree = "<group>";
 		};
 		4D52A1000000000000000011 /* Sources */ = {
@@ -247,6 +257,7 @@
 
 /* Begin XCBuildConfiguration section */
 		4D52A10000000000000000C0 /* Debug */ = {
+			baseConfigurationReference = 4D52A1000000000000000034 /* Signing.xcconfig */;
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -281,6 +292,7 @@
 			name = Debug;
 		};
 		4D52A10000000000000000C1 /* Release */ = {
+			baseConfigurationReference = 4D52A1000000000000000034 /* Signing.xcconfig */;
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
@@ -309,11 +321,8 @@
 		4D52A10000000000000000C2 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = CCTBHBZJSU;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -334,11 +343,8 @@
 		4D52A10000000000000000C3 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = CCTBHBZJSU;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
@@ -360,10 +366,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = local.macripper.MacRipperTests;
@@ -377,10 +380,7 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
-				CODE_SIGN_IDENTITY = "-";
-				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
-				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				MARKETING_VERSION = 1.0.0;
 				PRODUCT_BUNDLE_IDENTIFIER = local.macripper.MacRipperTests;
