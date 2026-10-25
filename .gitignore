@@ -8,3 +8,6 @@ DerivedData/
 
 # Personal signing settings, see Config/Signing.xcconfig
 Config/Signing.local.xcconfig
+
+# Coverage data from test runs
+*.profraw

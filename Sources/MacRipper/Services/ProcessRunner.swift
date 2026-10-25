@@ -104,11 +104,19 @@ private final class OutputCollector: @unchecked Sendable {
     func feed(_ data: Data) {
         lock.lock(); defer { lock.unlock() }
         buffer.append(data)
-        while let idx = buffer.firstIndex(where: { $0 == 0x0A || $0 == 0x0D }) {
-            let lineData = buffer[buffer.startIndex..<idx]
-            buffer.removeSubrange(buffer.startIndex...idx)
-            emit(String(decoding: lineData, as: UTF8.self))
+        // Walk the chunk once and drop the consumed part at the end; removing every line from the front
+        // would copy the rest of the buffer for each of the hundreds of lines in a chunk.
+        var start = buffer.startIndex
+        var i = start
+        while i < buffer.endIndex {
+            let byte = buffer[i]
+            if byte == 0x0A || byte == 0x0D {
+                if i > start { emit(String(decoding: buffer[start..<i], as: UTF8.self)) }
+                start = buffer.index(after: i)
+            }
+            i = buffer.index(after: i)
         }
+        if start > buffer.startIndex { buffer.removeSubrange(buffer.startIndex..<start) }
     }
 
     func flush() {

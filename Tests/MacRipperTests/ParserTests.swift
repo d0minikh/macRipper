@@ -262,3 +262,31 @@ import Testing
         try await limiter.acquire(limit: 1)
     }
 }
+
+/// Progress tools separate lines with \r, \n or both; every line must arrive once, in order, without empties.
+@Test func processOutputIsSplitIntoLines() async throws {
+    let lines = LineRecorder()
+    let out = try await ProcessRunner().run("/usr/bin/printf", ["one\rtwo\r\nthree\n\nfour"]) { lines.add($0) }
+    #expect(lines.all == ["one", "two", "three", "four"])
+    #expect(out == "one\ntwo\nthree\nfour\n")
+}
+
+private final class LineRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lines: [String] = []
+    func add(_ line: String) { lock.withLock { lines.append(line) } }
+    var all: [String] { lock.withLock { lines } }
+}
+
+/// Covers are decoded at the size they are shown at, not at their full 3000 px.
+@MainActor @Test func coverIsDecodedAtDisplaySize() throws {
+    let file = FileManager.default.temporaryDirectory.appendingPathComponent("cover-\(UUID().uuidString).jpg")
+    defer { try? FileManager.default.removeItem(at: file) }
+    let data = AudioMetadataTests.makeJPEG(width: 2000, height: 2000)
+    try data.write(to: file)
+    let cover = CoverImage(path: file.path, width: 2000, height: 2000, bytes: data.count, format: "jpeg", source: "File")
+    let thumb = try #require(CoverCache.image(for: cover, points: 32))
+    #expect(thumb.size.width == 64)
+    let panel = try #require(CoverCache.image(for: cover, points: 280))
+    #expect(panel.size.width == 1024)
+}

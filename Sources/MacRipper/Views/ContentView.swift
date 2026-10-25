@@ -275,10 +275,10 @@ struct JobThumbnail: View {
 
     var body: some View {
         Group {
-            if let cover = job.audioInfo?.cover, let image = CoverCache.image(for: cover) {
+            if let cover = job.audioInfo?.cover, let image = CoverCache.image(for: cover, points: size) {
                 Image(nsImage: image).resizable().interpolation(.high).scaledToFill()
             } else if let url = URL(string: job.posterURL), !job.posterURL.isEmpty {
-                AsyncImage(url: url) { $0.resizable().scaledToFill() } placeholder: { symbol }
+                RemoteImage(url: url, points: size, fill: true) { symbol }
             } else {
                 symbol
             }

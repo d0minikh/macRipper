@@ -41,18 +41,17 @@ struct PageBackdrop: View {
 
     @ViewBuilder
     private var artwork: some View {
-        if let cover = job?.audioInfo?.cover, let image = CoverCache.image(for: cover) {
+        // Blurred by 80 pt anyway, so a small image looks the same and costs a fraction to decode and blur.
+        if let cover = job?.audioInfo?.cover, let image = CoverCache.image(for: cover, points: 128) {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFill()
                 .blur(radius: 80, opaque: true)
                 .opacity(0.5)
         } else if let job, job.discType.isVideo, let url = URL(string: job.posterURL), !job.posterURL.isEmpty {
-            AsyncImage(url: url) { image in
-                image.resizable().scaledToFill().blur(radius: 80, opaque: true).opacity(0.45)
-            } placeholder: {
-                tintWash
-            }
+            RemoteImage(url: url, points: 128, fill: true) { tintWash }
+                .blur(radius: 80, opaque: true)
+                .opacity(0.45)
         } else {
             tintWash
         }

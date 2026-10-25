@@ -211,7 +211,7 @@ struct CoverImageView: View {
 
     var body: some View {
         Group {
-            if let cover, let image = CoverCache.image(for: cover) {
+            if let cover, let image = CoverCache.image(for: cover, points: size) {
                 Image(nsImage: image).resizable().interpolation(.high).scaledToFit()
             } else {
                 Image(systemName: "music.note")

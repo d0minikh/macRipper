@@ -14,7 +14,6 @@ rebuilt from scratch in SwiftUI with Liquid Glass.
 ![macOS 26+](https://img.shields.io/badge/macOS-26%2B-000000?logo=apple&logoColor=white)
 ![Swift](https://img.shields.io/badge/Swift-SwiftUI-F05138?logo=swift&logoColor=white)
 ![Xcode](https://img.shields.io/badge/Xcode-27-147EFB?logo=xcode&logoColor=white)
-![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 ![Built with Claude Code](https://img.shields.io/badge/vibe%20coded%20with-Claude%20Code-D97757)
 
 [Features](#features) ·
@@ -52,7 +51,6 @@ rebuilt from scratch in SwiftUI with Liquid Glass.
 - [Development](#development)
 - [Acknowledgements](#acknowledgements)
 - [Disclaimer](#disclaimer)
-- [License](#license)
 
 ## Why MacRipper?
 
@@ -460,11 +458,3 @@ own license terms.
 
 MacRipper is an independent project and is not affiliated with or endorsed by Apple, Anthropic, the Automatic
 Ripping Machine project, MakeMKV, HandBrake, MusicBrainz or any other project or service mentioned here.
-
-## License
-
-MacRipper is released under the [MIT License](LICENSE) – you may use, modify and share it freely, also
-commercially, as long as the copyright notice and license text are included.
-
-The external tools MacRipper works with (MakeMKV, HandBrake, FFmpeg, Apprise) are separate programs under their own
-licenses and are not part of this repository.

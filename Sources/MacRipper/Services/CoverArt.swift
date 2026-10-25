@@ -157,15 +157,23 @@ enum CoverArt {
         if let edition = all.first(where: { $0.caption == "This edition" }) { picks.append(edition) }
         if let group = all.first(where: { $0.caption == "Any edition of the album" }) { picks.append(group) }
         if let apple = all.first(where: { $0.source == "Apple Music" }) { picks.append(apple) }
-        var downloaded: [(CoverCandidate, Data, ImageInfo)] = []
-        for candidate in picks {
-            do {
-                let (data, info) = try await download(candidate)
-                log?.write("Cover candidate: \(candidate.source) (\(candidate.caption)) \(info.width)×\(info.height)")
-                downloaded.append((candidate, data, info))
-            } catch {
-                log?.write("Cover from \(candidate.source) failed: \(error.localizedDescription)")
+        // Downloaded in parallel: the candidates come from different servers, so this takes as long as the slowest.
+        let downloaded = await withTaskGroup(of: (CoverCandidate, Data, ImageInfo)?.self) { group in
+            for candidate in picks {
+                group.addTask {
+                    do {
+                        let (data, info) = try await download(candidate)
+                        log?.write("Cover candidate: \(candidate.source) (\(candidate.caption)) \(info.width)×\(info.height)")
+                        return (candidate, data, info)
+                    } catch {
+                        log?.write("Cover from \(candidate.source) failed: \(error.localizedDescription)")
+                        return nil
+                    }
+                }
             }
+            var results: [(CoverCandidate, Data, ImageInfo)] = []
+            for await result in group { if let result { results.append(result) } }
+            return results
         }
         return best(of: downloaded)
     }

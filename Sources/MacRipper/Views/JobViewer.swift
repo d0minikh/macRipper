@@ -91,7 +91,7 @@ private struct ViewerHeader: View {
         if job.discType == .audioCD {
             CoverImageView(cover: job.audioInfo?.cover, size: 112)
         } else if job.discType.isVideo, let url = URL(string: job.posterURL), !job.posterURL.isEmpty {
-            AsyncImage(url: url) { $0.resizable().scaledToFit() } placeholder: { JobThumbnail(job: job, size: 96) }
+            RemoteImage(url: url, points: 112) { JobThumbnail(job: job, size: 96) }
                 .frame(width: 78, height: 112)
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .shadow(color: .black.opacity(0.25), radius: 6, y: 3)
@@ -327,7 +327,8 @@ struct ActivityLCD: View {
     }
 
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
+        // Only a running job has a clock to advance; an idle LCD would otherwise wake the app every second.
+        TimelineView(.periodic(from: .now, by: job == nil ? 86_400 : 1)) { context in
             HStack(spacing: 14) {
                 Circle()
                     .fill(job.map { $0.status.tint } ?? Color.secondary.opacity(0.6))

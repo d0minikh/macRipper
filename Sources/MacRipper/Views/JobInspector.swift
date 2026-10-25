@@ -225,7 +225,14 @@ struct LogView: View {
         .onReceive(timer) { _ in reload() }
     }
 
+    @ViewState private var loadedSize: Int?
+
+    /// Reads the file only when it grew or changed, instead of the whole log every two seconds.
     func reload() {
+        // FileManager, not URL resource values: those are cached per URL and would never see the file grow.
+        let size = (try? FileManager.default.attributesOfItem(atPath: url.path))?[.size] as? Int
+        guard size != loadedSize || text.isEmpty else { return }
+        loadedSize = size
         let new = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
         if new != text { text = new }
     }

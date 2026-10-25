@@ -4,7 +4,12 @@ import Combine
 /// Orchestrates rip jobs from disc insertion to the finished files (ARM: ripper/main.py).
 @MainActor
 final class JobManager: ObservableObject {
-    @Published private(set) var jobs: [Job] = []
+    @Published private(set) var jobs: [Job] = [] {
+        didSet { sortJobs() }
+    }
+    /// Kept sorted here instead of filtering and sorting on every view access (several times per redraw).
+    private(set) var activeJobs: [Job] = []
+    private(set) var finishedJobs: [Job] = []
 
     let configStore: ConfigStore
     let monitor: DiscMonitor
@@ -23,9 +28,12 @@ final class JobManager: ObservableObject {
         self.configStore = configStore
         self.monitor = monitor
         loadJobs()
+        sortJobs()
+        // dropFirst: the list just loaded does not need to be written straight back.
         saveCancellable = $jobs
+            .dropFirst()
             .debounce(for: .seconds(1), scheduler: RunLoop.main)
-            .sink { Self.save($0) }
+            .sink { jobs in Self.saveQueue.async { Self.save(jobs) } }
         monitor.onInserted = { [weak self] disc, atLaunch in
             guard let self else { return }
             if atLaunch || !self.config.autoRip { return }
@@ -41,14 +49,20 @@ final class JobManager: ObservableObject {
         }
     }
 
-    private static func save(_ jobs: [Job]) {
+    /// Encoding and writing run off the main thread; a serial queue keeps the writes in order.
+    nonisolated private static let saveQueue = DispatchQueue(label: "MacRipper.jobs-save", qos: .utility)
+
+    nonisolated private static func save(_ jobs: [Job]) {
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         if let data = try? enc.encode(jobs) { try? AppPaths.writePrivate(data, to: AppPaths.jobsFile) }
     }
 
     /// Writes the job list right away; the regular save is debounced and would miss changes made just before quitting.
-    func saveNow() { Self.save(jobs) }
+    func saveNow() {
+        let jobs = jobs
+        Self.saveQueue.sync { Self.save(jobs) }
+    }
 
     private func loadJobs() {
         guard let data = try? Data(contentsOf: AppPaths.jobsFile) else { return }
@@ -63,16 +77,21 @@ final class JobManager: ObservableObject {
             return
         }
         // Jobs that were running when the app quit cannot be resumed.
+        guard jobs.contains(where: \.status.isActive) else { return }
         for i in jobs.indices where jobs[i].status.isActive {
             jobs[i].status = .failed
             jobs[i].errorMessage = "Interrupted (app was quit)"
         }
+        Self.save(jobs)
     }
 
     // MARK: - Public API used by the UI and web server
 
-    var activeJobs: [Job] { jobs.filter { $0.status.isActive }.sorted { $0.created > $1.created } }
-    var finishedJobs: [Job] { jobs.filter { !$0.status.isActive }.sorted { $0.created > $1.created } }
+    private func sortJobs() {
+        let sorted = jobs.sorted { $0.created > $1.created }
+        activeJobs = sorted.filter { $0.status.isActive }
+        finishedJobs = sorted.filter { !$0.status.isActive }
+    }
 
     func job(_ id: UUID) -> Job? { jobs.first { $0.id == id } }
 
@@ -264,7 +283,10 @@ final class JobManager: ObservableObject {
 
     private func update(_ id: UUID, _ change: (inout Job) -> Void) {
         guard let i = jobs.firstIndex(where: { $0.id == id }) else { return }
-        change(&jobs[i])
+        // Every write to `jobs` redraws all views watching the manager, so unchanged jobs are not written back.
+        var job = jobs[i]
+        change(&job)
+        if job != jobs[i] { jobs[i] = job }
     }
 
     private func setStage(_ id: UUID, _ status: JobStatus, _ stage: String, progress: Double = 0) {
@@ -282,7 +304,9 @@ final class JobManager: ObservableObject {
     private func progressHandler(_ id: UUID, scale: (Double, Double) = (0, 1)) -> @Sendable (Double) -> Void {
         // Updates arrive asynchronously; one queued before the next stage began must not overwrite its progress.
         let stage = job(id)?.stageStarted
+        let throttle = ProgressThrottle()
         return { [weak self] p in
+            guard throttle.shouldEmit(p) else { return }
             Task { @MainActor in
                 self?.update(id) {
                     guard $0.stageStarted == stage else { return }
@@ -896,5 +920,26 @@ final class JobManager: ObservableObject {
         // Same positional arguments as ARM's BASH_SCRIPT: title, path, disc type, status
         _ = try? await ProcessRunner().run(script, [job.displayTitle, job.outputPath, job.discType.rawValue, job.status.rawValue],
                                            log: log)
+    }
+}
+
+/// MakeMKV and HandBrake report progress many times per second. The UI only needs a few updates per second,
+/// and each update redraws every view that shows jobs.
+private final class ProgressThrottle: @unchecked Sendable {
+    private let lock = NSLock()
+    private var lastValue = -1.0
+    private var lastTime = Date.distantPast
+
+    func shouldEmit(_ value: Double) -> Bool {
+        lock.withLock {
+            let now = Date()
+            let finished = value >= 1 && lastValue < 1
+            guard finished || (now.timeIntervalSince(lastTime) >= 0.25 && abs(value - lastValue) >= 0.001) else {
+                return false
+            }
+            lastValue = value
+            lastTime = now
+            return true
+        }
     }
 }
