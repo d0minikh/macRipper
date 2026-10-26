@@ -138,7 +138,7 @@ struct ContentView: View {
             case .job:
                 EmptyView()
             default:
-                Button { monitor.refreshDrives() } label: { Label("Refresh Drives", systemImage: "arrow.clockwise") }
+                Button { monitor.refresh() } label: { Label("Refresh Drives", systemImage: "arrow.clockwise") }
                     .help("Look for optical drives again")
             }
             InspectorToggle(isPresented: $showInspector)

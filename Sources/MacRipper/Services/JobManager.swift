@@ -23,6 +23,7 @@ final class JobManager: ObservableObject {
     @Published private(set) var retagErrors: [UUID: String] = [:]
     private let limiter = TranscodeLimiter()
     private var saveCancellable: AnyCancellable?
+    private var activity: NSObjectProtocol?
 
     init(configStore: ConfigStore, monitor: DiscMonitor) {
         self.configStore = configStore
@@ -91,6 +92,21 @@ final class JobManager: ObservableObject {
         let sorted = jobs.sorted { $0.created > $1.created }
         activeJobs = sorted.filter { $0.status.isActive }
         finishedJobs = sorted.filter { !$0.status.isActive }
+        updateActivity()
+    }
+
+    /// Keeps the Mac from idle-sleeping and the app out of App Nap while a job runs; otherwise a rip or an
+    /// encode stalls once the display turns off, and a USB drive can drop off during sleep. A CD waiting
+    /// indefinitely for the user does not count, so it cannot keep the Mac awake all night.
+    private func updateActivity() {
+        let working = activeJobs.contains { !($0.status == .waiting && needsUserInput.contains($0.id)) }
+        if working, activity == nil {
+            activity = ProcessInfo.processInfo.beginActivity(options: [.userInitiated, .idleSystemSleepDisabled],
+                                                             reason: "Ripping a disc")
+        } else if !working, let current = activity {
+            ProcessInfo.processInfo.endActivity(current)
+            activity = nil
+        }
     }
 
     func job(_ id: UUID) -> Job? { jobs.first { $0.id == id } }
@@ -321,11 +337,11 @@ final class JobManager: ObservableObject {
 
     /// Ejects the disc once ripping is done. The stage moves on first, so the disc disappearing is not
     /// mistaken for a disc pulled mid-rip.
-    private func ejectAfterRip(_ id: UUID, _ devicePath: String) async {
+    private func ejectAfterRip(_ id: UUID, _ devicePath: String, log: JobLogger) async {
         setStage(id, .finishing, "Ripping finished")
         guard config.autoEject else { return }
         setStage(id, .finishing, "Ejecting disc")
-        await DiscMonitor.eject(devicePath)
+        await DiscMonitor.eject(devicePath, log: log)
     }
 
     private func isCancelled(_ id: UUID) -> Bool { job(id)?.status == .abandoned || Task.isCancelled }
@@ -404,7 +420,7 @@ final class JobManager: ObservableObject {
             if let job = job(id) {
                 await Notifier.send(.failed, job: job, config: config, log: log)
             }
-            if config.ejectOnFailure, monitor.discs.contains(disc) { await DiscMonitor.eject(disc.devicePath) }
+            if config.ejectOnFailure, monitor.discs.contains(disc) { await DiscMonitor.eject(disc.devicePath, log: log) }
         }
     }
 
@@ -613,7 +629,7 @@ final class JobManager: ObservableObject {
             }
         }
         log.write("Ripping finished")
-        await ejectAfterRip(id, disc.devicePath)
+        await ejectAfterRip(id, disc.devicePath, log: log)
 
         // Title, year and kind may have been corrected while the disc was ripping.
         let current = self.job(id) ?? job
@@ -807,7 +823,7 @@ final class JobManager: ObservableObject {
             }
         }
         update(id) { $0.audioInfo?.tagsChangedAfterRip = false }
-        await ejectAfterRip(id, job.devicePath)
+        await ejectAfterRip(id, job.devicePath, log: log)
     }
 
     /// Rewrites tags and cover of an already ripped CD after edits and renames files and folder to match.
@@ -905,7 +921,7 @@ final class JobManager: ObservableObject {
         setStage(id, .ripping, "Creating ISO image")
         try await DataRipper(config: config).rip(devicePath: job.devicePath, mountPoint: job.mountPoint, to: out,
                                                  runner: runner, log: log, onProgress: progressHandler(id))
-        await ejectAfterRip(id, job.devicePath)
+        await ejectAfterRip(id, job.devicePath, log: log)
     }
 
     // MARK: Post processing

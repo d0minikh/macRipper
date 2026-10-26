@@ -233,7 +233,8 @@ version at the top of the script in sync with the Xcode project.
 2. **Check the details** during the countdown – title and year for movies, album, tracks and cover for CDs.
    Edit anything in the table or the inspector, or press **Start Now**.
 3. **Walk away.** The LCD in the toolbar shows what runs and how long it will take. The disc is ejected when ripping
-   is done; transcoding continues in the background so the next disc can go in right away.
+   is done; transcoding continues in the background so the next disc can go in right away. While a job runs,
+   MacRipper keeps the Mac from going to sleep on its own (the display may still turn off).
 4. **Find your files** in `~/Movies/MacRipper/completed`, `~/Music/MacRipper` or `~/Documents/MacRipper/ISO`.
 
 ### Keyboard shortcuts
@@ -394,6 +395,15 @@ MakeMKV's LibreDrive mode usually helps.
 
 No OMDb/TMDb key is configured or the label could not be matched. Add a key in *Settings → Metadata*, or search the
 title yourself during the countdown (⇧⌘F).
+</details>
+
+<details>
+<summary><b>The disc is not ejected or the drive is missing.</b></summary>
+
+The job log (⇧⌘L) shows every eject attempt and, if it fails, the reason macOS gives. A drive that has just finished
+reading can stay locked for a few seconds, so MacRipper retries and forces the unmount if needed. If a drive or disc
+is missing after the Mac woke up, click **Refresh Drives** in the toolbar – MacRipper also does this by itself a few
+seconds after waking. Discs found this way are not ripped automatically; click **Rip** on the Drives page.
 </details>
 
 <details>
