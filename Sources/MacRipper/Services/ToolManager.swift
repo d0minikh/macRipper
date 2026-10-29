@@ -51,7 +51,7 @@ final class ToolManager: ObservableObject {
                  source: .makemkv, path: Tools.makemkvcon(cfg)),
             Tool(id: "handbrake", name: "HandBrakeCLI", purpose: "Transcodes video",
                  source: .brew(formula: "handbrake"), path: Tools.handbrakeCLI(cfg)),
-            Tool(id: "ffmpeg", name: "FFmpeg", purpose: "Optional: FFmpeg transcoder, MP3 and tags for all audio formats",
+            Tool(id: "ffmpeg", name: "FFmpeg", purpose: "Optional: FFmpeg transcoder and MP3 encoding",
                  source: .brew(formula: "ffmpeg"), path: Tools.ffmpeg(cfg)),
             Tool(id: "apprise", name: "Apprise", purpose: "Optional: Apprise notifications",
                  source: .brew(formula: "apprise"), path: Tools.apprise),

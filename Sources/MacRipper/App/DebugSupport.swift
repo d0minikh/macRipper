@@ -6,7 +6,12 @@ import SwiftUI
 /// - MACRIPPER_DEMO=1 adds sample jobs so every view can be inspected without a disc.
 /// - MACRIPPER_SNAPSHOT=/path/prefix writes PNG snapshots of the app's windows.
 /// - MACRIPPER_RIP_PRESENT=1 starts jobs for discs that were already inserted at launch.
-/// - MACRIPPER_SELECT=tools|history opens the Tools section or the newest history job on launch.
+/// - MACRIPPER_SELECT=tools|history|tags|tagalbum|tagall opens the Tools section, the newest history job, the Tag Editor,
+///   its first album, or the Tag Editor with all albums selected on launch.
+/// - MACRIPPER_TAG_FILES=<path>[:<path>…] adds these files or folders to the Tag Editor.
+/// - MACRIPPER_TAG_INSPECTOR_WINDOW=info|artwork|file shows the Tag Editor inspector of the first album in a plain window;
+///   with MACRIPPER_TAG_INSPECTOR_ALL=1 it edits all albums together.
+/// - MACRIPPER_DROP_PREVIEW=1 shows the Tag Editor's drop highlights as if files were dragged over them.
 /// - MACRIPPER_CLEAR_HISTORY=<seconds> clears the job history after the given delay.
 /// - MACRIPPER_INSPECTOR_WINDOW=info|artwork|file shows the inspector of the newest job in a plain window
 ///   (window snapshots cannot capture the Liquid Glass inspector column).
@@ -16,8 +21,29 @@ import SwiftUI
 enum DebugSupport {
     private static var inspectorWindow: NSWindow?
 
-    static func setUp(_ manager: JobManager) {
+    static func setUp(_ manager: JobManager, tagEditor: TagEditor) {
         let env = ProcessInfo.processInfo.environment
+        if let paths = env["MACRIPPER_TAG_FILES"] {
+            let urls = paths.split(separator: ":").map { URL(fileURLWithPath: String($0)) }
+            Task { await tagEditor.add(urls) }
+        }
+        if let tab = env["MACRIPPER_TAG_INSPECTOR_WINDOW"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                let albums = tagEditor.sortedAlbums.map(\.album.id)
+                guard let first = albums.first else { return }
+                UserDefaults.standard.set(tab, forKey: "inspectorTab")
+                let ids = env["MACRIPPER_TAG_INSPECTOR_ALL"] == "1" ? albums : [first]
+                let view = TagEditorInspector(albumIDs: ids, selection: [], sheet: .constant(nil))
+                    .environmentObject(tagEditor)
+                    .frame(width: 340, height: 900)
+                let window = NSWindow(contentRect: NSRect(x: 80, y: 80, width: 340, height: 900),
+                                      styleMask: [.titled], backing: .buffered, defer: false)
+                window.title = "Tag Inspector (debug)"
+                window.contentView = NSHostingView(rootView: view)
+                window.orderFront(nil)
+                inspectorWindow = window
+            }
+        }
         if env["MACRIPPER_DEMO"] == "1" {
             // Delayed so the sidebar auto-selects the new job like a freshly inserted disc.
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { manager.injectDemoJobs() }

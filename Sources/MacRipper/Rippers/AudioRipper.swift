@@ -2,7 +2,7 @@ import Foundation
 import AVFoundation
 
 /// Everything written into an audio file. Field names follow MusicBrainz Picard's conventions.
-struct AudioTags {
+struct AudioTags: Equatable {
     var title = ""
     var artist = ""
     var album = ""
@@ -33,7 +33,7 @@ struct AudioTags {
     var musicBrainzDiscID = ""
     var cover: EmbeddedCover?
 
-    struct EmbeddedCover {
+    struct EmbeddedCover: Equatable {
         let data: Data
         let format: String           // jpeg / png
         let width: Int
@@ -44,7 +44,10 @@ struct AudioTags {
     var year: String { String(date.prefix(4)) }
 
     /// Vorbis comment fields (FLAC), in Picard's naming.
-    var vorbisFields: [(String, String)] {
+    var vorbisFields: [(String, String)] { vorbisFieldsIncludingEmpty.filter { !$0.1.isEmpty } }
+
+    /// Every Vorbis field MacRipper manages, empty ones included, so a rewrite can clear them.
+    var vorbisFieldsIncludingEmpty: [(String, String)] {
         [
             ("TITLE", title), ("ARTIST", artist), ("ALBUM", album), ("ALBUMARTIST", albumArtist),
             ("ALBUMARTISTSORT", albumArtistSort), ("DATE", date), ("ORIGINALDATE", originalDate),
@@ -59,23 +62,7 @@ struct AudioTags {
             ("MUSICBRAINZ_ALBUMARTISTID", musicBrainzAlbumArtistID), ("MUSICBRAINZ_ARTISTID", musicBrainzArtistID),
             ("MUSICBRAINZ_TRACKID", musicBrainzRecordingID), ("MUSICBRAINZ_RELEASETRACKID", musicBrainzReleaseTrackID),
             ("MUSICBRAINZ_DISCID", musicBrainzDiscID),
-        ].filter { !$0.1.isEmpty }
-    }
-
-    /// ffmpeg `-metadata` keys for ID3v2.4 (MP3). Unknown keys become TXXX frames named like Picard's.
-    var id3Fields: [(String, String)] {
-        [
-            ("title", title), ("artist", artist), ("album", album), ("album_artist", albumArtist),
-            ("TSO2", albumArtistSort), ("date", date), ("TDOR", originalDate),
-            ("track", track > 0 ? (trackTotal > 0 ? "\(track)/\(trackTotal)" : "\(track)") : ""),
-            ("disc", disc > 0 ? (discTotal > 0 ? "\(disc)/\(discTotal)" : "\(disc)") : ""),
-            ("genre", genre), ("composer", composer), ("comment", comment), ("publisher", label),
-            ("TSRC", isrc), ("TMED", media), ("compilation", compilation ? "1" : ""),
-            ("CATALOGNUMBER", catalogNumber), ("BARCODE", barcode), ("MusicBrainz Album Release Country", country),
-            ("MusicBrainz Album Id", musicBrainzReleaseID), ("MusicBrainz Release Group Id", musicBrainzReleaseGroupID),
-            ("MusicBrainz Album Artist Id", musicBrainzAlbumArtistID), ("MusicBrainz Artist Id", musicBrainzArtistID),
-            ("MusicBrainz Release Track Id", musicBrainzReleaseTrackID), ("MusicBrainz Disc Id", musicBrainzDiscID),
-        ].filter { !$0.1.isEmpty }
+        ]
     }
 }
 
@@ -137,21 +124,17 @@ struct AudioRipper {
         try? FileManager.default.removeItem(at: output)
         let format = config.audioFormat
 
-        if format == .mp3 {
-            guard let ffmpeg = Tools.ffmpeg(config) else { throw RipError.missingTool("ffmpeg for MP3 (brew install ffmpeg)") }
-            // MP3 tags (ID3v2.4) are written by ffmpeg while encoding.
-            try await Self.ffmpegWriteMP3(ffmpeg, input: input, output: output, tags: tags,
-                                          codec: ["-c:a", "libmp3lame", "-q:a", "0"], runner: runner, log: log)
-            return
+        if format == .mp3, Tools.ffmpeg(config) == nil {
+            throw RipError.missingTool("ffmpeg for MP3 (brew install ffmpeg)")
         }
-
         if let ffmpeg = Tools.ffmpeg(config), format != .wav {
             var args = ["-y", "-hide_banner", "-loglevel", "error", "-i", input.path, "-map", "0:a", "-map_metadata", "-1"]
             switch format {
             case .flac: args += ["-c:a", "flac", "-compression_level", "8"]
             case .alac: args += ["-c:a", "alac"]
             case .aac: args += ["-c:a", "aac", "-b:a", "\(config.aacBitrate)"]
-            case .mp3, .wav: break
+            case .mp3: args += ["-c:a", "libmp3lame", "-q:a", "0"]
+            case .wav: break
             }
             try await runner.run(ffmpeg, args + [output.path], log: log)
         } else {
@@ -169,57 +152,39 @@ struct AudioRipper {
     }
 
     /// Writes (or rewrites) all tags and the cover of an existing file.
+    /// `preservingOtherTags` keeps tags MacRipper does not manage (lyrics, ReplayGain …); `keepExistingCover` keeps
+    /// the embedded cover when `tags.cover` is nil instead of removing it.
     static func writeTags(_ tags: AudioTags, to file: URL, config: AppConfig, runner: ProcessRunner,
-                          log: JobLogger?) async throws {
+                          log: JobLogger?, preservingOtherTags: Bool = false, keepExistingCover: Bool = false) async throws {
         switch file.pathExtension.lowercased() {
-        case "flac": try FLACTagger.write(tags, to: file)
-        case "m4a": try await M4ATagger.write(tags, to: file)
+        case "flac":
+            try FLACTagger.write(tags, to: file, preservingOtherTags: preservingOtherTags, keepExistingCover: keepExistingCover)
+        case "m4a":
+            try MP4Tag.write(tags, to: file, preservingOtherTags: preservingOtherTags, keepExistingCover: keepExistingCover)
         case "mp3":
-            guard let ffmpeg = Tools.ffmpeg(config) else { throw RipError.missingTool("ffmpeg to tag MP3 files") }
-            let tmp = file.deletingLastPathComponent().appendingPathComponent(".retag-\(UUID().uuidString).mp3")
-            do {
-                try await ffmpegWriteMP3(ffmpeg, input: file, output: tmp, tags: tags, codec: ["-c:a", "copy"],
-                                         runner: runner, log: log)
-                _ = try FileManager.default.replaceItemAt(file, withItemAt: tmp)
-            } catch {
-                try? FileManager.default.removeItem(at: tmp)
-                throw error
-            }
+            try ID3Tag.write(tags, to: file, preservingOtherTags: preservingOtherTags, keepExistingCover: keepExistingCover)
         default: break                // WAV has no widely supported tags
         }
-    }
-
-    private static func ffmpegWriteMP3(_ ffmpeg: String, input: URL, output: URL, tags: AudioTags, codec: [String],
-                                       runner: ProcessRunner, log: JobLogger?) async throws {
-        var args = ["-y", "-hide_banner", "-loglevel", "error", "-i", input.path]
-        var coverFile: URL?
-        if let cover = tags.cover {
-            let url = FileManager.default.temporaryDirectory
-                .appendingPathComponent("macripper-cover-\(UUID().uuidString).\(cover.format == "png" ? "png" : "jpg")")
-            try cover.data.write(to: url)
-            coverFile = url
-            args += ["-i", url.path]
-        }
-        defer { coverFile.map { try? FileManager.default.removeItem(at: $0) } }
-        args += ["-map", "0:a"] + codec + ["-map_metadata", "-1", "-id3v2_version", "4", "-write_id3v1", "1"]
-        if coverFile != nil {
-            args += ["-map", "1:v", "-c:v", "copy", "-disposition:v", "attached_pic",
-                     "-metadata:s:v", "title=Album cover", "-metadata:s:v", "comment=Cover (front)"]
-        }
-        for (key, value) in tags.id3Fields { args += ["-metadata", "\(key)=\(value)"] }
-        try await runner.run(ffmpeg, args + ["-f", "mp3", output.path], log: log)
     }
 }
 
 /// Writes a Vorbis comment and a front cover picture block into a FLAC file.
 enum FLACTagger {
-    static func write(_ tags: AudioTags, to url: URL) throws {
+    /// Field names MacRipper manages, including the aliases other taggers use for them. When other tags are
+    /// preserved, these are replaced and everything else is kept.
+    static let managedFields: Set<String> = Set(AudioTags().vorbisFieldsIncludingEmpty.map(\.0))
+        .union(["ALBUM ARTIST", "ORIGINALYEAR", "YEAR", "DESCRIPTION", "ORGANIZATION", "PUBLISHER"])
+
+    static func write(_ tags: AudioTags, to url: URL, preservingOtherTags: Bool = false,
+                      keepExistingCover: Bool = false) throws {
         var data = try Data(contentsOf: url)
         guard data.count > 8, data.prefix(4) == Data("fLaC".utf8) else { return }
 
         // Collect existing metadata blocks, dropping old comments/pictures and padding.
         var pos = 4
         var blocks: [(type: UInt8, body: Data)] = []
+        var keptFields: [String] = []
+        var vendor = "MacRipper"
         var last = false
         while !last, pos + 4 <= data.count {
             let header = data[data.startIndex + pos]
@@ -228,12 +193,27 @@ enum FLACTagger {
             let len = Int(data[pos + 1]) << 16 | Int(data[pos + 2]) << 8 | Int(data[pos + 3])
             guard pos + 4 + len <= data.count else { throw RipError.failed("\(url.lastPathComponent) is not a valid FLAC file") }
             let body = data.subdata(in: (pos + 4)..<(pos + 4 + len))
-            if type != 4, type != 6, type != 1 { blocks.append((type, body)) }
+            switch type {
+            case 4 where preservingOtherTags:
+                if let comment = parseVorbisComment(body) {
+                    vendor = comment.vendor
+                    keptFields += comment.fields.filter { !managedFields.contains($0.key.uppercased()) }
+                        .map { "\($0.key)=\($0.value)" }
+                }
+            case 6:
+                // Front covers (and untyped pictures) are replaced; back covers, booklets … stay when preserving.
+                let pictureType = body.count >= 4 ? Int(body[body.startIndex]) << 24 | Int(body[body.startIndex + 1]) << 16
+                    | Int(body[body.startIndex + 2]) << 8 | Int(body[body.startIndex + 3]) : 0
+                let isFront = pictureType == 3 || pictureType == 0
+                if isFront ? (keepExistingCover && tags.cover == nil) : preservingOtherTags { blocks.append((type, body)) }
+            case 1, 4: break
+            default: blocks.append((type, body))
+            }
             pos += 4 + len
         }
         let audio = data.subdata(in: pos..<data.count)
 
-        blocks.append((4, vorbisComment(tags)))
+        blocks.append((4, vorbisComment(tags, vendor: vendor, extraFields: keptFields)))
         if let cover = tags.cover {
             let picture = picture(cover)
             // A metadata block length is 24 bit (16 MB); larger covers are left out rather than corrupting the file.
@@ -251,7 +231,7 @@ enum FLACTagger {
             data.append(block.body)
         }
         data.append(audio)
-        try data.write(to: url, options: .atomic)
+        try FileWriting.replace(url, with: data)
     }
 
     private static func le32(_ v: Int) -> Data {
@@ -262,12 +242,36 @@ enum FLACTagger {
         Data([UInt8(v >> 24 & 0xFF), UInt8(v >> 16 & 0xFF), UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)])
     }
 
-    static func vorbisComment(_ t: AudioTags) -> Data {
-        let vendor = Data("MacRipper".utf8)
-        let fields = t.vorbisFields.map { Data("\($0.0)=\($0.1)".utf8) }
+    static func vorbisComment(_ t: AudioTags, vendor: String = "MacRipper", extraFields: [String] = []) -> Data {
+        let vendor = Data(vendor.utf8)
+        let fields = t.vorbisFields.map { Data("\($0.0)=\($0.1)".utf8) } + extraFields.map { Data($0.utf8) }
         var d = le32(vendor.count) + vendor + le32(fields.count)
         for f in fields { d += le32(f.count) + f }
         return d
+    }
+
+    /// Vendor string and fields of a VORBIS_COMMENT block, in file order.
+    static func parseVorbisComment(_ body: Data) -> (vendor: String, fields: [(key: String, value: String)])? {
+        let d = [UInt8](body)
+        var pos = 0
+        func le32() -> Int? {
+            guard pos + 4 <= d.count else { return nil }
+            defer { pos += 4 }
+            return Int(d[pos]) | Int(d[pos + 1]) << 8 | Int(d[pos + 2]) << 16 | Int(d[pos + 3]) << 24
+        }
+        func string(_ length: Int) -> String? {
+            guard length >= 0, pos + length <= d.count else { return nil }
+            defer { pos += length }
+            return String(decoding: d[pos..<(pos + length)], as: UTF8.self)
+        }
+        guard let vendorLength = le32(), let vendor = string(vendorLength), let count = le32() else { return nil }
+        var fields: [(key: String, value: String)] = []
+        for _ in 0..<count {
+            guard let length = le32(), let field = string(length) else { break }
+            guard let eq = field.firstIndex(of: "=") else { continue }
+            fields.append((String(field[..<eq]), String(field[field.index(after: eq)...])))
+        }
+        return (vendor, fields)
     }
 
     /// METADATA_BLOCK_PICTURE, type 3 = front cover.
@@ -286,65 +290,5 @@ enum FLACTagger {
         block.append(be32(cover.data.count))
         block.append(cover.data)
         return block
-    }
-}
-
-/// Writes iTunes metadata to ALAC/AAC files via a passthrough export.
-enum M4ATagger {
-    static func write(_ tags: AudioTags, to url: URL) async throws {
-        let asset = AVURLAsset(url: url)
-        guard let export = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough) else { return }
-        func item(_ id: AVMetadataIdentifier, _ value: String) -> AVMetadataItem? {
-            guard !value.isEmpty else { return nil }
-            let i = AVMutableMetadataItem()
-            i.identifier = id
-            i.value = value as NSString
-            return i
-        }
-        func data(_ id: AVMetadataIdentifier, _ value: Data, type: CFString) -> AVMetadataItem {
-            let i = AVMutableMetadataItem()
-            i.identifier = id
-            i.value = value as NSData
-            i.dataType = type as String
-            return i
-        }
-        var items = [
-            item(.iTunesMetadataSongName, tags.title),
-            item(.iTunesMetadataArtist, tags.artist),
-            item(.iTunesMetadataAlbumArtist, tags.albumArtist),
-            item(.iTunesMetadataAlbum, tags.album),
-            item(.iTunesMetadataReleaseDate, tags.date),
-            item(.iTunesMetadataUserGenre, tags.genre),
-            item(.iTunesMetadataComposer, tags.composer),
-            item(.iTunesMetadataUserComment, tags.comment),
-            item(.iTunesMetadataRecordCompany, tags.label),
-        ].compactMap { $0 }
-        // trkn: 2 bytes padding, track, total, 2 bytes padding. disk: padding, disc, total.
-        func be16(_ v: Int) -> [UInt8] { [UInt8(v >> 8 & 0xFF), UInt8(v & 0xFF)] }
-        if tags.track > 0 {
-            items.append(data(.iTunesMetadataTrackNumber, Data([0, 0] + be16(tags.track) + be16(tags.trackTotal) + [0, 0]),
-                              type: kCMMetadataBaseDataType_RawData))
-        }
-        if tags.disc > 0 {
-            items.append(data(.iTunesMetadataDiscNumber, Data([0, 0] + be16(tags.disc) + be16(tags.discTotal)),
-                              type: kCMMetadataBaseDataType_RawData))
-        }
-        if tags.compilation {
-            items.append(data(.iTunesMetadataDiscCompilation, Data([1]), type: kCMMetadataBaseDataType_UInt8))
-        }
-        if let cover = tags.cover {
-            items.append(data(.iTunesMetadataCoverArt, cover.data,
-                              type: cover.format == "png" ? kCMMetadataBaseDataType_PNG : kCMMetadataBaseDataType_JPEG))
-        }
-
-        let tmp = url.deletingLastPathComponent().appendingPathComponent(".tag-\(UUID().uuidString).m4a")
-        export.metadata = items
-        do {
-            try await export.export(to: tmp, as: .m4a)
-            _ = try FileManager.default.replaceItemAt(url, withItemAt: tmp)
-        } catch {
-            try? FileManager.default.removeItem(at: tmp)
-            throw RipError.failed("Could not write tags to \(url.lastPathComponent): \(error.localizedDescription)")
-        }
     }
 }

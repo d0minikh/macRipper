@@ -12,7 +12,7 @@ fi
 # Keep in sync with the build settings in MacRipper.xcodeproj.
 BUNDLE_ID="de.macripper.macRipper"
 MARKETING_VERSION="1.0.0"
-BUILD_NUMBER="2"
+BUILD_NUMBER="3"
 DEPLOYMENT_TARGET="26.0"
 
 swift build -c release

@@ -3,15 +3,22 @@ import SwiftUI
 /// The right panel: a floating Liquid Glass card over the page, like the queue and lyrics panels in Apple Music.
 struct InspectorPanel: View {
     let jobID: UUID?
+    var tagAlbumIDs: [UUID] = []
+    var tagSelection: Set<UUID> = []
+    var tagSheet: Binding<TagSheet?> = .constant(nil)
+    var placeholder = "Select a job to see and edit its details."
     static let cornerRadius: CGFloat = 22
 
     var body: some View {
         Group {
             if let jobID {
                 JobInspector(jobID: jobID).id(jobID)
+            } else if !tagAlbumIDs.isEmpty {
+                TagEditorInspector(albumIDs: tagAlbumIDs, selection: tagSelection, sheet: tagSheet)
+                    .id(tagAlbumIDs)
             } else {
                 ContentUnavailableView("Nothing to Inspect", systemImage: "sidebar.right",
-                                       description: Text("Select a job to see and edit its details."))
+                                       description: Text(placeholder))
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -26,6 +33,9 @@ struct InspectorPanel: View {
 /// underneath the sidebar, the inspector and the toolbar, so both glass panels visibly float above it.
 struct PageBackdrop: View {
     let job: Job?
+    /// Artwork and color of pages that do not show a job (the Tag Editor).
+    var cover: CoverImage?
+    var tint: Color?
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -42,7 +52,7 @@ struct PageBackdrop: View {
     @ViewBuilder
     private var artwork: some View {
         // Blurred by 80 pt anyway, so a small image looks the same and costs a fraction to decode and blur.
-        if let cover = job?.audioInfo?.cover, let image = CoverCache.image(for: cover, points: 128) {
+        if let cover = job?.audioInfo?.cover ?? cover, let image = CoverCache.image(for: cover, points: 128) {
             Image(nsImage: image)
                 .resizable()
                 .scaledToFill()
@@ -58,7 +68,7 @@ struct PageBackdrop: View {
     }
 
     private var tintWash: some View {
-        LinearGradient(colors: [(job?.discType.tint ?? .accentColor).opacity(0.22), .clear],
+        LinearGradient(colors: [(job?.discType.tint ?? tint ?? .accentColor).opacity(0.22), .clear],
                        startPoint: .top, endPoint: .bottom)
     }
 }

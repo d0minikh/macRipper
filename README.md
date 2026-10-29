@@ -46,6 +46,7 @@ rebuilt from scratch in SwiftUI with Liquid Glass.
 - [Usage](#usage)
 - [Configuration](#configuration)
 - [Audio CDs: tags and covers](#audio-cds-tags-and-covers)
+- [Tag Editor: tag the music you already have](#tag-editor-tag-the-music-you-already-have)
 - [Notifications](#notifications)
 - [Web interface and API](#web-interface-and-api)
 - [FAQ & troubleshooting](#faq--troubleshooting)
@@ -89,6 +90,16 @@ Mac – as a real Mac app instead of a Docker container:
   without recompression.
 - **Edit everything by hand** – album fields, every track title and artist, the cover (drag and drop) – and write
   the changes back to already ripped files, renaming files and folders to match.
+
+### 🏷️ Tag Editor
+- Tags **music you already have** – single songs or whole albums, FLAC, Apple Lossless, AAC and MP3.
+- Edit one song, a whole album or several albums at once; fields that differ show "Mixed" and take one value for all.
+- Add songs and folders with the file dialog or by drag and drop.
+- **Look up albums and songs on MusicBrainz**: MacRipper matches your files to the release's tracks and lets you
+  correct the assignment before anything changes.
+- Find the sharpest cover, number tracks, capitalize titles, fill tags from file names and **rename files** after
+  their tags – with a preview.
+- Nothing is written before you save, and tags MacRipper does not manage (lyrics, ReplayGain …) stay in the files.
 
 ### 🗂️ Data discs
 - Creates a 1:1 ISO image of the disc, or a re-mastered ISO via `hdiutil`.
@@ -248,8 +259,11 @@ version at the top of the script in sync with the Xcode project.
 | ⇧⌘F | Search metadata |
 | ⇧⌘T | Write tags to files (audio CDs) |
 | ⇧⌘L | Show log |
+| ⌘O | Add music to the Tag Editor |
+| ⌘S | Save tags (Tag Editor) |
+| ⌥⌘F | Look up on MusicBrainz (Tag Editor) |
 | ⌥⌘I | Show / hide inspector |
-| ⌘1 / ⌘2 | Drives / Tools |
+| ⌘1 / ⌘2 / ⌘3 | Drives / Tools / Tag Editor |
 | ⌘, | Settings |
 
 ## Configuration
@@ -297,12 +311,13 @@ Audio folder and file names follow patterns with the placeholders `{artist}`, `{
 | --- | :-: | :-: | :-: |
 | Title, artist, album, album artist, date, genre, track/disc number and total, compilation | ✓ | ✓ | ✓ |
 | Label, comment, composer | ✓ | ✓ | ✓ |
-| Original date, catalog number, barcode, ISRC, country, media, album artist sort | ✓ | ✓ | – |
-| MusicBrainz IDs (release, release group, artists, recording, release track, disc ID) | ✓ | ✓ | – |
+| Album artist sort | ✓ | ✓ | ✓ |
+| Original date, catalog number, barcode, ISRC, country, media | ✓ | ✓ | ✓ |
+| MusicBrainz IDs (release, release group, artists, recording, release track, disc ID) | ✓ | ✓ | ✓ |
 | Front cover | ✓ | ✓ | ✓ |
 
-FLAC uses Vorbis comments, MP3 ID3v2.4, ALAC/AAC iTunes atoms – field names follow
-[MusicBrainz Picard](https://picard.musicbrainz.org).
+FLAC uses Vorbis comments, MP3 ID3v2.4, ALAC/AAC iTunes atoms (with freeform atoms for the extra fields) – field
+names follow [MusicBrainz Picard](https://picard.musicbrainz.org).
 
 **Cover art:** MacRipper compares the cover of the exact edition and of the album on Cover Art Archive with the
 Apple Music artwork and keeps the sharpest square one. The original is saved next to the music as
@@ -311,6 +326,36 @@ Apple Music artwork and keeps the sharpest square one. The original is saved nex
 
 **Unknown CDs** are not ripped until you identified them – search MusicBrainz by artist and album, paste a
 MusicBrainz release link, or type the tags yourself.
+
+## Tag Editor: tag the music you already have
+
+The **Tag Editor** in the sidebar (⌘3) tidies up music that is already on your Mac – ripped by MacRipper or
+anything else. It reads and writes FLAC, Apple Lossless/AAC (`.m4a`) and MP3 with the same fields as the table
+above.
+
+1. **Add music** with the + button (⌘O) – songs and whole folders, several at once – or drop songs or folders onto
+   the Tag Editor or the sidebar. Folders are searched completely. Files are grouped into albums by folder and
+   album tag; songs without an album tag form a group per folder. Every album appears in the sidebar.
+2. **Edit.** Double-click an album (or choose it in the sidebar) to see its songs. To edit several albums at once –
+   for example to set the same genre or label – select them in the cover grid with ⌘-click or ⇧-click (or *Select
+   All*); the inspector then edits all their songs. Titles and artists can be edited right in the table; the inspector
+   edits everything else. With no song selected, the inspector edits the whole album; with several songs
+   selected, fields that differ show *Mixed* – typing a value sets it for all of them.
+3. **Look it up.** *Look Up on MusicBrainz* (⌥⌘F) searches for the album, or paste a release link. After you choose
+   a release, MacRipper assigns your files to its tracks – by title and position, then title, then position, then
+   length – and shows the result, so you can correct it before applying. *Look Up Song…* (context menu or
+   inspector) finds a single song by title and artist; it gets the tags of the album you choose. The best cover of
+   the release can be taken over at the same time.
+4. **Covers.** *Find Covers…* shows Cover Art Archive and Apple Music candidates; you can also choose a file or drop
+   an image onto the cover. *Save as cover.jpg in Folder* puts the album's cover next to its files.
+5. **Tidy up.** The context menu of the table numbers tracks in order, capitalizes titles, fills tags from file
+   names like `03 - Artist - Title`, and *Rename Files…* renames files after their tags (with a preview, using the
+   file name pattern from Settings).
+6. **Save** (⌘S). Changed songs are marked with an orange dot until you save; *Revert Changes* discards edits.
+
+Saving only replaces the fields MacRipper manages and keeps everything else in the file – lyrics, ReplayGain,
+ratings, other pictures, gapless information. Tags of all three formats are written directly by MacRipper, without
+FFmpeg; the audio itself is never touched.
 
 ## Notifications
 
@@ -430,6 +475,8 @@ or make Xcode the default once: `sudo xcode-select -s /Applications/Xcode.app/Co
 - Audio CDs are read through the AIFF files macOS provides – there is no secure ripping / AccurateRip verification.
 - The 1:1 ISO needs read access to `/dev/rdiskN`; without it the image is re-mastered with `hdiutil`.
 - ARM's online CRC64 database for DVD identification is not used.
+- The Tag Editor identifies music by its tags, file names and lengths – there is no acoustic fingerprinting
+  (AcoustID). Its list of loaded files is not kept when you quit the app; unsaved changes are lost.
 - The interface is in English; dates and numbers follow your region settings.
 
 ## Development

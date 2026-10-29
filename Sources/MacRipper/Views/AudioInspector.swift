@@ -164,7 +164,10 @@ struct ArtworkPanel: View {
             if let error { Text(error).foregroundStyle(.red) }
         }
         .formStyle(.grouped)
-        .sheet(isPresented: $showCovers) { CoverPickerSheet(job: job) }
+        .sheet(isPresented: $showCovers) {
+            CoverPickerSheet(load: { await manager.coverCandidates(job.id) },
+                             use: { try await manager.useCover(job.id, $0) })
+        }
     }
 
     private func chooseFile() {
@@ -229,9 +232,9 @@ struct CoverImageView: View {
 }
 
 /// Grid of cover candidates from Cover Art Archive and Apple Music.
-private struct CoverPickerSheet: View {
-    let job: Job
-    @EnvironmentObject var manager: JobManager
+struct CoverPickerSheet: View {
+    let load: () async -> [CoverCandidate]
+    let use: (CoverCandidate) async throws -> Void
     @Environment(\.dismiss) private var dismiss
     @ViewState private var candidates: [CoverCandidate] = []
     @ViewState private var loading = true
@@ -294,7 +297,7 @@ private struct CoverPickerSheet: View {
         .padding()
         .frame(width: 640, height: 560)
         .task {
-            candidates = await manager.coverCandidates(job.id)
+            candidates = await load()
             loading = false
         }
     }
@@ -304,7 +307,7 @@ private struct CoverPickerSheet: View {
         error = nil
         Task {
             do {
-                try await manager.useCover(job.id, candidate)
+                try await use(candidate)
                 dismiss()
             } catch {
                 self.error = error.localizedDescription

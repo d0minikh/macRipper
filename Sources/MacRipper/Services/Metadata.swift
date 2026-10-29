@@ -34,6 +34,9 @@ struct AudioRelease: Identifiable, Hashable {
     var trackCount = 0
     var hasFrontCover = false
     var tracks: [AudioTrackInfo] = []
+    /// Tracks and format of every medium (disc) by position, for tagging files of multi-disc albums.
+    var discTracks: [Int: [AudioTrackInfo]] = [:]
+    var discFormats: [Int: String] = [:]
     /// Search results only carry a summary; the tracks are loaded when the release is chosen.
     var isComplete: Bool { !tracks.isEmpty }
 
@@ -55,6 +58,29 @@ struct AudioTrackInfo: Hashable {
     var recordingID = ""
     var releaseTrackID = ""
     var isrc = ""
+    var length = 0                   // seconds, 0 = unknown
+}
+
+/// A recording found by a song search, together with one release it appears on.
+struct RecordingMatch: Identifiable, Hashable {
+    var id: String { "\(recordingID)-\(releaseID)" }
+    let recordingID: String
+    let title: String
+    let artist: String
+    let length: Int                  // seconds, 0 = unknown
+    let releaseID: String
+    let releaseTitle: String
+    let releaseArtist: String
+    let date: String
+    let country: String
+    let format: String
+    let trackNumber: String          // as printed on the release, e.g. "3" or "A3"
+    let releaseType: String          // Album, Single, Compilation …
+    let official: Bool
+
+    var releaseSummary: String {
+        [releaseTitle, date, country, format, releaseType].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
 }
 
 enum MetadataError: LocalizedError {
@@ -194,6 +220,70 @@ enum Metadata {
         return results
     }
 
+    /// Release search for files of an existing album: releases with the same number of tracks first, then any
+    /// release matching the text (the files may be only part of an album, or of a different edition).
+    static func searchReleasesForFiles(_ query: String, trackCount: Int) async throws -> [AudioRelease] {
+        if let id = releaseID(in: query) { return [try await release(id: id, trackCount: trackCount)] }
+        func search(_ lucene: String) async throws -> [AudioRelease] {
+            let json = try await getJSON(url("https://musicbrainz.org/ws/2/release", [
+                "query": lucene, "fmt": "json", "limit": "25",
+            ]))
+            return ((json as? [String: Any])?["releases"] as? [[String: Any]] ?? [])
+                .map { parseRelease($0, discID: nil, trackCount: trackCount) }
+        }
+        let exact = trackCount > 0 ? try await search("\(query) AND tracksmedium:\(trackCount)") : []
+        var seen = Set(exact.map(\.id))
+        let any = try await search(query).filter { seen.insert($0.id).inserted }
+        return exact + any
+    }
+
+    /// Song search by title and artist (and optionally album). Every release of a recording becomes one match,
+    /// official albums first.
+    static func searchRecordings(title: String, artist: String, album: String = "") async throws -> [RecordingMatch] {
+        func quoted(_ s: String) -> String {
+            "\"" + s.replacingOccurrences(of: "\\", with: "").replacingOccurrences(of: "\"", with: "") + "\""
+        }
+        var parts = ["recording:\(quoted(title))"]
+        if !artist.isEmpty { parts.append("artist:\(quoted(artist))") }
+        if !album.isEmpty { parts.append("release:\(quoted(album))") }
+        let json = try await getJSON(url("https://musicbrainz.org/ws/2/recording", [
+            "query": parts.joined(separator: " AND "), "fmt": "json", "limit": "25",
+        ]))
+        return parseRecordings(json)
+    }
+
+    static func parseRecordings(_ json: Any) -> [RecordingMatch] {
+        var matches: [RecordingMatch] = []
+        for r in (json as? [String: Any])?["recordings"] as? [[String: Any]] ?? [] {
+            let recordingID = r["id"] as? String ?? ""
+            let artist = artistCredit(r["artist-credit"])
+            for release in r["releases"] as? [[String: Any]] ?? [] {
+                let group = release["release-group"] as? [String: Any] ?? [:]
+                let medium = (release["media"] as? [[String: Any]])?.first
+                let track = (medium?["track"] as? [[String: Any]])?.first
+                let releaseArtist = artistCredit(release["artist-credit"])
+                let secondary = group["secondary-types"] as? [String] ?? []
+                matches.append(RecordingMatch(
+                    recordingID: recordingID,
+                    title: r["title"] as? String ?? "",
+                    artist: artist,
+                    length: (r["length"] as? Int ?? 0) / 1000,
+                    releaseID: release["id"] as? String ?? "",
+                    releaseTitle: release["title"] as? String ?? "",
+                    releaseArtist: releaseArtist.isEmpty ? artist : releaseArtist,
+                    date: release["date"] as? String ?? "",
+                    country: release["country"] as? String ?? "",
+                    format: medium?["format"] as? String ?? "",
+                    trackNumber: track?["number"] as? String ?? "",
+                    releaseType: secondary.first ?? group["primary-type"] as? String ?? "",
+                    official: (release["status"] as? String ?? "Official") == "Official"))
+            }
+        }
+        // Official albums are what most people want to tag a song with; the order within each group is MusicBrainz's.
+        func rank(_ m: RecordingMatch) -> Int { (m.official ? 0 : 2) + (m.releaseType == "Album" ? 0 : 1) }
+        return matches.enumerated().sorted { (rank($0.element), $0.offset) < (rank($1.element), $1.offset) }.map(\.element)
+    }
+
     static func releaseID(in text: String) -> String? {
         let pattern = #"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"#
         guard let range = text.range(of: pattern, options: .regularExpression) else { return nil }
@@ -262,18 +352,27 @@ enum Metadata {
         release.discTotal = max(media.count, r["medium-count"] as? Int ?? 0, 1)
         release.trackCount = medium?["track-count"] as? Int ?? (r["track-count"] as? Int ?? 0)
         release.hasFrontCover = (r["cover-art-archive"] as? [String: Any])?["front"] as? Bool ?? false
-        release.tracks = (medium?["tracks"] as? [[String: Any]] ?? []).enumerated().map { idx, t in
-            let recording = t["recording"] as? [String: Any] ?? [:]
-            let credit = t["artist-credit"] ?? recording["artist-credit"]
-            var track = AudioTrackInfo(number: t["position"] as? Int ?? idx + 1)
-            track.title = t["title"] as? String ?? recording["title"] as? String ?? "Track \(idx + 1)"
-            let artist = artistCredit(credit)
-            track.artist = artist.isEmpty ? albumArtist : artist
-            track.artistID = firstArtist(credit)?["id"] as? String ?? ""
-            track.recordingID = recording["id"] as? String ?? ""
-            track.releaseTrackID = t["id"] as? String ?? ""
-            track.isrc = (recording["isrcs"] as? [String])?.first ?? ""
-            return track
+        func tracks(_ medium: [String: Any]?) -> [AudioTrackInfo] {
+            (medium?["tracks"] as? [[String: Any]] ?? []).enumerated().map { idx, t in
+                let recording = t["recording"] as? [String: Any] ?? [:]
+                let credit = t["artist-credit"] ?? recording["artist-credit"]
+                var track = AudioTrackInfo(number: t["position"] as? Int ?? idx + 1)
+                track.title = t["title"] as? String ?? recording["title"] as? String ?? "Track \(idx + 1)"
+                let artist = artistCredit(credit)
+                track.artist = artist.isEmpty ? albumArtist : artist
+                track.artistID = firstArtist(credit)?["id"] as? String ?? ""
+                track.recordingID = recording["id"] as? String ?? ""
+                track.releaseTrackID = t["id"] as? String ?? ""
+                track.isrc = (recording["isrcs"] as? [String])?.first ?? ""
+                track.length = (t["length"] as? Int ?? recording["length"] as? Int ?? 0) / 1000
+                return track
+            }
+        }
+        release.tracks = tracks(medium)
+        for (index, m) in media.enumerated() where m["tracks"] != nil {
+            let position = m["position"] as? Int ?? index + 1
+            release.discTracks[position] = tracks(m)
+            release.discFormats[position] = m["format"] as? String ?? ""
         }
         return release
     }

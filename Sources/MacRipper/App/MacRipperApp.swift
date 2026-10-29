@@ -8,12 +8,15 @@ final class AppModel: ObservableObject {
     let manager: JobManager
     let webServer: WebServer
     let toolManager: ToolManager
+    let tagEditor: TagEditor
     private var cancellables: Set<AnyCancellable> = []
 
     init() {
         manager = JobManager(configStore: configStore, monitor: monitor)
         webServer = WebServer(manager: manager)
         toolManager = ToolManager(configStore: configStore)
+        tagEditor = TagEditor(configStore: configStore)
+        AppDelegate.tagEditor = tagEditor
         // The App body reads only the menu bar setting; re-render it just when that changes; any broader
         // forwarding loops, because inserting the menu bar item writes the binding back.
         configStore.$config
@@ -56,7 +59,7 @@ final class AppModel: ObservableObject {
         monitor.start()
         Notifier.requestAuthorization()
         #if DEBUG
-        DebugSupport.setUp(manager)
+        DebugSupport.setUp(manager, tagEditor: tagEditor)
         #endif
     }
 
@@ -74,8 +77,39 @@ final class AppModel: ObservableObject {
     }
 }
 
+/// Asks before quitting while the Tag Editor has changes that are not in the files yet.
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    @MainActor static weak var tagEditor: TagEditor?
+
+    @MainActor
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard let editor = Self.tagEditor, editor.modifiedCount > 0 else { return .terminateNow }
+        let count = editor.modifiedCount
+        let alert = NSAlert()
+        alert.messageText = "Save the changed tags before quitting?"
+        alert.informativeText = "\(count) song\(count == 1 ? " has" : "s have") changes in the Tag Editor that are not saved in the files yet. They are lost when you quit without saving."
+        alert.addButton(withTitle: "Save and Quit")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Quit Without Saving").hasDestructiveAction = true
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            Task { @MainActor in
+                await editor.save(editor.modifiedIDs)
+                // Files that could not be written keep their changes; the app stays open so nothing is lost.
+                sender.reply(toApplicationShouldTerminate: editor.modifiedCount == 0)
+            }
+            return .terminateLater
+        case .alertThirdButtonReturn:
+            return .terminateNow
+        default:
+            return .terminateCancel
+        }
+    }
+}
+
 @main
 struct MacRipperApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var model = AppModel()
 
     var body: some Scene {
@@ -85,12 +119,13 @@ struct MacRipperApp: App {
                 .environmentObject(model.configStore)
                 .environmentObject(model.monitor)
                 .environmentObject(model.toolManager)
+                .environmentObject(model.tagEditor)
                 // Room for sidebar, a usable viewer and the inspector.
                 .frame(minWidth: 1080, minHeight: 620)
         }
         .defaultSize(width: 1320, height: 820)
         .windowToolbarStyle(.unified(showsTitle: false))
-        .commands { MacRipperCommands(manager: model.manager, monitor: model.monitor) }
+        .commands { MacRipperCommands(manager: model.manager, monitor: model.monitor, tagEditor: model.tagEditor) }
 
         Settings {
             SettingsView()
